@@ -101,7 +101,7 @@ async function handle(request, env) {
     const input = await body(request), code = String(input.code || "").trim().toUpperCase();
     const name = String(input.deviceName || "").trim().slice(0, 80);
     if (!/^[A-F0-9]{16}$/.test(code) || !name) return json({ error: "invalid_code_or_device_name" }, 400);
-    const codeHash = await hash(code), timestamp = now();
+    const codeHash = await hash(code);
     const invite = await env.DB.prepare("SELECT i.code_hash,i.pharmacy_id,i.expires_at,i.used_at FROM invitations i JOIN pharmacies p ON p.id=i.pharmacy_id WHERE i.code_hash=? AND p.status='active'").bind(codeHash).first();
     if (!invite || invite.used_at || invite.expires_at < timestamp || !invite.pharmacy_id) return json({ error: "invite_invalid_or_expired" }, 410);
     const id = crypto.randomUUID();
