@@ -281,13 +281,61 @@ class PharmacyViewModel(
     val paidDebts = dao.paidDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     fun setDebtSort(sort: Int) { debtSort.value = sort }
     fun createDebt(name: String, lines: List<DebtLineRequest>, paid: Double, done: (Result<Long>) -> Unit) {
-        viewModelScope.launch { try { done(Result.success(dao.createDebt(name, lines, paid))) } catch (e: Exception) { done(Result.failure(e)) } }
+        viewModelScope.launch {
+            try {
+                val remoteLines = lines.map { line ->
+                    val medicine = dao.medicineById(line.medicineId) ?: error("أحد الأصناف لم يعد موجودًا")
+                    val remoteId = medicine.remoteId ?: error("هذا الصنف غير مرتبط بمخزون الصيدلية السحابي")
+                    remoteId to line.quantity
+                }
+                val remoteSaleId = withContext(Dispatchers.IO) {
+                    val customer = PharmacyDataApi.listCustomers(session.token, name, 1)
+                        .firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+                    val customerId = customer?.id ?: PharmacyDataApi.createCustomer(session.token, name.trim(), null, null)
+                    val response = PharmacyDataApi.createSale(
+                        session.token, java.util.UUID.randomUUID().toString(), remoteLines,
+                        customerId, (paid * 100.0).toLong()
+                    )
+                    response.optString("saleId").takeIf { it.isNotBlank() }
+                        ?: error("لم يصل رقم الفاتورة من الخادم")
+                }
+                val localId = dao.createDebt(name, lines, paid)
+                dao.setDebtRemoteSaleId(localId, remoteSaleId)
+                refreshCloudCatalog()
+                done(Result.success(localId))
+            } catch (e: Exception) { done(Result.failure(e)) }
+        }
     }
     fun payDebt(id: Long, amount: Double, done: (Result<Unit>) -> Unit) {
-        viewModelScope.launch { try { dao.recordDebtPayment(id, amount); done(Result.success(Unit)) } catch (e: Exception) { done(Result.failure(e)) } }
+        viewModelScope.launch {
+            try {
+                val debt = dao.debtById(id) ?: error("المديونية غير موجودة")
+                debt.remoteSaleId?.let { remoteId ->
+                    withContext(Dispatchers.IO) {
+                        PharmacyDataApi.addSalePayment(session.token, remoteId, (amount * 100.0).toLong())
+                    }
+                }
+                dao.recordDebtPayment(id, amount)
+                done(Result.success(Unit))
+            } catch (e: Exception) { done(Result.failure(e)) }
+        }
     }
     fun settleDebt(id: Long, done: (Result<Unit>) -> Unit) {
-        viewModelScope.launch { try { dao.markDebtPaid(id); done(Result.success(Unit)) } catch (e: Exception) { done(Result.failure(e)) } }
+        viewModelScope.launch {
+            try {
+                val debt = dao.debtById(id) ?: error("المديونية غير موجودة")
+                val remaining = (debt.totalAmount - debt.paidAmount).coerceAtLeast(0.0)
+                if (remaining > 0.000001) {
+                    debt.remoteSaleId?.let { remoteId ->
+                        withContext(Dispatchers.IO) {
+                            PharmacyDataApi.addSalePayment(session.token, remoteId, (remaining * 100.0).toLong())
+                        }
+                    }
+                }
+                dao.markDebtPaid(id)
+                done(Result.success(Unit))
+            } catch (e: Exception) { done(Result.failure(e)) }
+        }
     }
     private val reportFrom = MutableStateFlow(startOfDay())
     private val reportTo = MutableStateFlow(startOfDay() + 24L * 60 * 60 * 1000)
