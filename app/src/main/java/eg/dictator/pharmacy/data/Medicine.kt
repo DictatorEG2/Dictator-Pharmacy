@@ -68,7 +68,7 @@ data class TopSellingMedicine(
 )
 
 
-@Entity(tableName = "customer_debts", indices = [Index("createdAt"), Index("customerName")])
+@Entity(tableName = "customer_debts", indices = [Index("createdAt"), Index("customerName"), Index(value = ["remoteSaleId"], unique = true)])
 data class CustomerDebt(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val customerName: String,
