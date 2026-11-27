@@ -51,6 +51,8 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
     val searchText = MutableStateFlow("")
     val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val outOfStock = dao.outOfStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun addMedicine(name: String, category: String, price: Double, quantity: Int) {
         viewModelScope.launch {
@@ -76,6 +78,14 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
     var showAdd by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
     val medicines by vm.medicines.collectAsState()
+    val lowStock by vm.lowStock.collectAsState()
+    val outOfStock by vm.outOfStock.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val visibleMedicines = when (selectedTab) {
+        1 -> lowStock
+        2 -> outOfStock
+        else -> medicines
+    }.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) || it.category.contains(search, ignoreCase = true) }
 
     Scaffold(
         containerColor = Ink,
@@ -102,11 +112,27 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            if (medicines.isEmpty()) {
-                Text("لا توجد أدوية مسجلة بعد. اضغط + لإضافة أول دواء.", color = Muted)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
+                SummaryTile("مخزون منخفض", lowStock.size.toString(), Modifier.weight(1f))
+                SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+            TabRow(selectedTabIndex = selectedTab, containerColor = Panel, contentColor = Color.White) {
+                listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label ->
+                    Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(label) })
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (visibleMedicines.isEmpty()) {
+                Text(when (selectedTab) {
+                    1 -> "لا توجد أصناف منخفضة المخزون."
+                    2 -> "لا توجد أصناف نفد مخزونها."
+                    else -> "لا توجد أدوية مطابقة. اضغط + لإضافة دواء."
+                }, color = Muted)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(medicines, key = { it.id }) { medicine ->
+                    items(visibleMedicines, key = { it.id }) { medicine ->
                         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -161,6 +187,16 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
                 selected = null
             }
         )
+    }
+}
+
+@Composable
+private fun SummaryTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
