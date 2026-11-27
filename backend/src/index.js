@@ -40,16 +40,23 @@ async function createPharmacy(request, env) {
   const deviceName = String(input.deviceName || "").trim().slice(0, 80);
   if (!pharmacyName || !deviceName) return json({ error: "pharmacy_name_and_device_name_required" }, 400);
 
+  // Fail closed unless a strong, deployment-specific salt is configured.
+  const rateLimitSalt = env.RATE_LIMIT_SALT;
+  if (typeof rateLimitSalt !== "string" || rateLimitSalt.length < 32) {
+    return json({ error: "registration_security_not_configured" }, 503);
+  }
+
   // Hash the Cloudflare-provided client IP; never store the raw address.
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  const ipHash = await hash(ip + (env.RATE_LIMIT_SALT || "dictator-pharmacy-registration"));
+  const ipHash = await hash(ip + rateLimitSalt);
   const timestamp = now();
-  await env.DB.prepare(`INSERT INTO registration_limits(ip_hash,window_started_at,attempts) VALUES(?,?,1)
+  // One atomic statement prevents concurrent requests from bypassing the limit.
+  const limit = await env.DB.prepare(`INSERT INTO registration_limits(ip_hash,window_started_at,attempts) VALUES(?,?,1)
     ON CONFLICT(ip_hash) DO UPDATE SET
       attempts=CASE WHEN registration_limits.window_started_at<=? THEN 1 ELSE registration_limits.attempts+1 END,
-      window_started_at=CASE WHEN registration_limits.window_started_at<=? THEN excluded.window_started_at ELSE registration_limits.window_started_at END`)
-    .bind(ipHash, timestamp, timestamp - 3600, timestamp - 3600).run();
-  const limit = await env.DB.prepare("SELECT attempts FROM registration_limits WHERE ip_hash=?").bind(ipHash).first();
+      window_started_at=CASE WHEN registration_limits.window_started_at<=? THEN excluded.window_started_at ELSE registration_limits.window_started_at END
+    RETURNING attempts`)
+    .bind(ipHash, timestamp, timestamp - 3600, timestamp - 3600).first();
   if ((limit?.attempts || 0) > 5) return json({ error: "registration_rate_limited", retryAfterSeconds: 3600 }, 429);
 
   const pharmacyId = crypto.randomUUID();
