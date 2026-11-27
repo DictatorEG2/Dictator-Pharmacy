@@ -22,7 +22,7 @@ async function auth(request, env) {
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token || token.length < 32) return null;
   const tokenHash = await hash(token);
-  const device = await env.DB.prepare("SELECT id,name,role,status,pharmacy_id FROM devices WHERE token_hash=? AND status='active' AND pharmacy_id IS NOT NULL").bind(tokenHash).first();
+  const device = await env.DB.prepare("SELECT d.id,d.name,d.role,d.status,d.pharmacy_id FROM devices d JOIN pharmacies p ON p.id=d.pharmacy_id WHERE d.token_hash=? AND d.status='active' AND p.status='active'").bind(tokenHash).first();
   if (device) await env.DB.prepare("UPDATE devices SET last_seen_at=? WHERE id=? AND pharmacy_id=?").bind(now(), device.id, device.pharmacy_id).run();
   return device || null;
 }
