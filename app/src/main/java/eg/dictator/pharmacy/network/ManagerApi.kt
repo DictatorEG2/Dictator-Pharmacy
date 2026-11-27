@@ -44,8 +44,10 @@ object ManagerApi {
         }
     }
 
-    fun approveDevice(token: String, deviceId: String) {
-        request("/v1/manager/devices/$deviceId/approve", "POST", token, JSONObject())
+    fun approveDevice(token: String, deviceId: String): String {
+        val response = request("/v1/manager/devices/$deviceId/approve", "POST", token, JSONObject())
+        return response.optString("token").takeIf { it.length >= 32 }
+            ?: throw IOException("لم يصل رمز الجهاز بعد الموافقة")
     }
 
     fun revokeDevice(token: String, deviceId: String) {
