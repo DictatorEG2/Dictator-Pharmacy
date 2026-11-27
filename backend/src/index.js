@@ -2,7 +2,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders() }
 });
 function corsHeaders() {
-  return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type" };
+  return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "access-control-allow-headers": "authorization,content-type" };
 }
 const now = () => Math.floor(Date.now() / 1000);
 const randomToken = (bytes = 32) => {
@@ -73,6 +73,99 @@ async function createPharmacy(request, env) {
   if (!results?.[1]?.meta?.changes) return json({ error: "pharmacy_creation_failed" }, 500);
   return json({ pharmacyId, pharmacyName, deviceId, token, role: "manager" }, 201);
 }
+
+function normalizeMedicineName(value) {
+  return String(value || "").normalize("NFKC").trim().toLocaleLowerCase().replace(/\\s+/g, " ");
+}
+function validOptionalText(value, max) {
+  if (value == null || value === "") return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, max) : null;
+}
+async function medicineApi(request, env, device, url, path) {
+  const match = path.match(/^\\/v1\\/medicines(?:\\/([a-f0-9-]+))?$/i);
+  if (!match) return null;
+  const medicineId = match[1] || null;
+  if (request.method === "GET" && !medicineId) {
+    const q = normalizeMedicineName(url.searchParams.get("q") || "");
+    const category = validOptionalText(url.searchParams.get("category"), 80);
+    const pageValue = Number(url.searchParams.get("page") || 1);
+    const page = Number.isSafeInteger(pageValue) && pageValue > 0 ? Math.min(pageValue, 100000) : 1;
+    const where = ["pharmacy_id=?", "is_active=1"];
+    const values = [device.pharmacy_id];
+    if (q) { where.push("normalized_name LIKE ?"); values.push("%" + q + "%"); }
+    if (category) { where.push("category=?"); values.push(category); }
+    const result = await env.DB.prepare(`SELECT id,name,normalized_name,category,barcode,image_url,unit,sale_price_minor,low_stock_threshold,created_at,updated_at
+      FROM medicines WHERE ${where.join(" AND ")}
+      ORDER BY normalized_name ASC,id ASC LIMIT 21 OFFSET ?`)
+      .bind(...values, (page - 1) * 20).all();
+    const rows = result.results || [];
+    return json({ medicines: rows.slice(0, 20), page, pageSize: 20, hasMore: rows.length > 20, nextPage: rows.length > 20 ? page + 1 : null });
+  }
+  if (request.method === "POST" && !medicineId) {
+    const input = await body(request);
+    const name = String(input.name || "").trim().slice(0, 160);
+    const normalized = normalizeMedicineName(name);
+    const price = input.salePriceMinor ?? 0;
+    const threshold = input.lowStockThreshold ?? 0;
+    if (!name || !Number.isSafeInteger(price) || price < 0 || !Number.isSafeInteger(threshold) || threshold < 0)
+      return json({ error: "invalid_medicine_fields" }, 400);
+    const image = validOptionalText(input.imageUrl, 2048);
+    if (image) {
+      try { const parsed = new URL(image); if (!["http:", "https:"].includes(parsed.protocol)) throw new Error(); }
+      catch { return json({ error: "invalid_image_url" }, 400); }
+    }
+    const id = crypto.randomUUID(), timestamp = now();
+    try {
+      await env.DB.prepare(`INSERT INTO medicines
+        (id,pharmacy_id,name,normalized_name,category,barcode,image_url,unit,sale_price_minor,low_stock_threshold,is_active,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?)`)
+        .bind(id, device.pharmacy_id, name, normalized,
+          validOptionalText(input.category, 80), validOptionalText(input.barcode, 100), image,
+          validOptionalText(input.unit, 30) || "piece", price, threshold, timestamp, timestamp).run();
+    } catch (error) {
+      if (String(error?.message || "").includes("UNIQUE")) return json({ error: "barcode_already_exists" }, 409);
+      throw error;
+    }
+    await audit(env, device.pharmacy_id, device, "medicine_created", id);
+    return json({ id, name, normalizedName: normalized }, 201);
+  }
+  if (request.method === "PUT" && medicineId) {
+    const input = await body(request);
+    const name = String(input.name || "").trim().slice(0, 160);
+    const normalized = normalizeMedicineName(name);
+    const price = input.salePriceMinor;
+    const threshold = input.lowStockThreshold;
+    if (!name || !Number.isSafeInteger(price) || price < 0 || !Number.isSafeInteger(threshold) || threshold < 0)
+      return json({ error: "invalid_medicine_fields" }, 400);
+    const image = validOptionalText(input.imageUrl, 2048);
+    if (image) {
+      try { const parsed = new URL(image); if (!["http:", "https:"].includes(parsed.protocol)) throw new Error(); }
+      catch { return json({ error: "invalid_image_url" }, 400); }
+    }
+    try {
+      const result = await env.DB.prepare(`UPDATE medicines SET name=?,normalized_name=?,category=?,barcode=?,image_url=?,unit=?,sale_price_minor=?,low_stock_threshold=?,updated_at=?
+        WHERE id=? AND pharmacy_id=? AND is_active=1`)
+        .bind(name, normalized, validOptionalText(input.category, 80), validOptionalText(input.barcode, 100), image,
+          validOptionalText(input.unit, 30) || "piece", price, threshold, now(), medicineId, device.pharmacy_id).run();
+      if (!result.meta?.changes) return json({ error: "medicine_not_found" }, 404);
+    } catch (error) {
+      if (String(error?.message || "").includes("UNIQUE")) return json({ error: "barcode_already_exists" }, 409);
+      throw error;
+    }
+    await audit(env, device.pharmacy_id, device, "medicine_updated", medicineId);
+    return json({ id: medicineId, updated: true });
+  }
+  if (request.method === "DELETE" && medicineId) {
+    const result = await env.DB.prepare("UPDATE medicines SET is_active=0,updated_at=? WHERE id=? AND pharmacy_id=? AND is_active=1")
+      .bind(now(), medicineId, device.pharmacy_id).run();
+    if (!result.meta?.changes) return json({ error: "medicine_not_found" }, 404);
+    await audit(env, device.pharmacy_id, device, "medicine_deactivated", medicineId);
+    return json({ id: medicineId, deactivated: true });
+  }
+  return json({ error: "method_not_allowed" }, 405);
+}
+
 async function handle(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
   const url = new URL(request.url), path = url.pathname;
@@ -159,6 +252,8 @@ async function handle(request, env) {
   if (!device) return json({ error: "authentication_required" }, 401);
   if (path === "/v1/me" && request.method === "GET")
     return json({ deviceId: device.id, deviceName: device.name, role: device.role, status: device.status, pharmacyId: device.pharmacy_id });
+  const medicineResponse = await medicineApi(request, env, device, url, path);
+  if (medicineResponse) return medicineResponse;
   return json({ error: "not_found" }, 404);
 }
 export default {
