@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import eg.dictator.pharmacy.network.PharmacyApi
+import eg.dictator.pharmacy.network.PharmacyDataApi
 import eg.dictator.pharmacy.network.ManagerApi
 import eg.dictator.pharmacy.network.PharmacyDevice
 import eg.dictator.pharmacy.security.SecureSessionStore
@@ -69,7 +70,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val vm: PharmacyViewModel = viewModel(
                         key = "pharmacy_${current.pharmacyId}",
-                        factory = PharmacyViewModel.factory(dao)
+                        factory = PharmacyViewModel.factory(dao, current)
                     )
                     PharmacyScreen(vm, current)
                 }
@@ -233,7 +234,41 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
     }
 }
 
-class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
+class PharmacyViewModel(
+    private val dao: MedicineDao,
+    private val session: SecureSessionStore.Session
+) : ViewModel() {
+    init { refreshCloudCatalog() }
+
+    private fun refreshCloudCatalog() {
+        viewModelScope.launch {
+            try {
+                val remote = withContext(Dispatchers.IO) {
+                    PharmacyDataApi.listAllMedicines(session.token)
+                }
+                val ids = remote.map { it.id }
+                remote.forEach { item ->
+                    val old = dao.medicineByRemoteId(item.id)
+                    dao.upsertRemoteMedicine(
+                        Medicine(
+                            id = old?.id ?: 0,
+                            name = item.name,
+                            category = item.category.orEmpty(),
+                            sellingPrice = item.salePriceMinor / 100.0,
+                            quantity = item.quantity,
+                            minimumQuantity = item.lowStockThreshold,
+                            barcode = item.barcode,
+                            updatedAt = System.currentTimeMillis(),
+                            remoteId = item.id
+                        )
+                    )
+                }
+                if (ids.isNotEmpty()) dao.removeMissingRemoteMedicines(ids)
+            } catch (_: Exception) {
+                // Keep the last locally cached catalog when temporarily offline.
+            }
+        }
+    }
     val searchText = MutableStateFlow("")
     val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -273,25 +308,65 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
 
     fun addMedicine(name: String, category: String, price: Double, quantity: Int) {
         viewModelScope.launch {
-            dao.insertMedicine(Medicine(name = name.trim(), category = category.trim(), sellingPrice = price, quantity = quantity))
+            try {
+                require(session.role == "manager") { "إضافة الأدوية للمدير فقط" }
+                val remoteId = withContext(Dispatchers.IO) {
+                    val id = PharmacyDataApi.createMedicine(
+                        session.token, name.trim(), category.trim(), null,
+                        "piece", (price * 100.0).toLong(), 3
+                    )
+                    if (quantity > 0) PharmacyDataApi.receiveStock(session.token, id, quantity)
+                    id
+                }
+                dao.upsertRemoteMedicine(
+                    Medicine(
+                        name = name.trim(), category = category.trim(),
+                        sellingPrice = price, quantity = quantity,
+                        remoteId = remoteId
+                    )
+                )
+            } catch (_: Exception) {
+                // Do not create a local-only medicine that would appear shared.
+            }
         }
     }
 
     fun adjustStock(id: Long, delta: Int, reason: String) {
-        viewModelScope.launch { dao.adjustStock(id, delta, reason) }
+        viewModelScope.launch {
+            try {
+                val medicine = dao.medicineById(id) ?: return@launch
+                val remoteId = medicine.remoteId ?: return@launch
+                if (delta > 0) {
+                    withContext(Dispatchers.IO) { PharmacyDataApi.receiveStock(session.token, remoteId, delta) }
+                } else {
+                    return@launch
+                }
+                dao.setRemoteQuantity(remoteId, medicine.quantity + delta, System.currentTimeMillis())
+            } catch (_: Exception) { }
+        }
     }
 
-    fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<Long>) -> Unit) {
+    fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<String>) -> Unit) {
         viewModelScope.launch {
-            try { onResult(Result.success(dao.completeSale(lines))) }
-            catch (error: Exception) { onResult(Result.failure(error)) }
+            try {
+                val remoteLines = lines.map { line ->
+                    val medicine = dao.medicineById(line.medicineId) ?: error("أحد الأصناف لم يعد موجودًا")
+                    val remoteId = medicine.remoteId ?: error("هذا الصنف محلي وغير مرتبط بمخزون الصيدلية السحابي")
+                    remoteId to line.quantity
+                }
+                val response = withContext(Dispatchers.IO) {
+                    PharmacyDataApi.createSale(session.token, java.util.UUID.randomUUID().toString(), remoteLines)
+                }
+                refreshCloudCatalog()
+                onResult(Result.success(response.optString("invoiceNumber", response.optString("saleId"))))
+            } catch (error: Exception) { onResult(Result.failure(error)) }
         }
     }
 
     companion object {
-        fun factory(dao: MedicineDao) = object : ViewModelProvider.Factory {
+        fun factory(dao: MedicineDao, session: SecureSessionStore.Session) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = PharmacyViewModel(dao) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = PharmacyViewModel(dao, session) as T
         }
     }
 }
@@ -545,7 +620,7 @@ private fun AdjustStockDialog(medicine: Medicine, onDismiss: () -> Unit, onApply
 private fun SaleDialog(
     medicines: List<Medicine>,
     onDismiss: () -> Unit,
-    onComplete: (List<SaleLineRequest>, (Result<Long>) -> Unit) -> Unit
+    onComplete: (List<SaleLineRequest>, (Result<String>) -> Unit) -> Unit
 ) {
     val cart = remember { mutableStateMapOf<Long, Int>() }
     var query by remember { mutableStateOf("") }
