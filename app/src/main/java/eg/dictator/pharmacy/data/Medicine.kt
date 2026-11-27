@@ -5,7 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "medicines", indices = [Index("name"), Index(value = ["barcode"], unique = true)])
+@Entity(tableName = "medicines", indices = [Index("name"), Index(value = ["barcode"], unique = true), Index(value = ["remoteId"], unique = true)])
 data class Medicine(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
