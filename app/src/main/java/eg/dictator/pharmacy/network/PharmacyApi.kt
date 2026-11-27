@@ -22,6 +22,43 @@ object PharmacyApi {
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 20_000
 
+    fun signInWithDeviceToken(token: String): PharmacyRegistration {
+        require(token.length >= 32) { "رمز الدخول غير صحيح" }
+        val connection = (URL("$BASE_URL/v1/me").openConnection() as HttpURLConnection)
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Authorization", "Bearer $token")
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            val response = try { JSONObject(text) } catch (_: Exception) {
+                throw IOException("استجابة غير مفهومة من الخادم")
+            }
+            if (status !in 200..299) {
+                val code = response.optString("error", "server_error")
+                throw IOException(if (code == "authentication_required") "رمز الدخول غير صالح أو تم إيقاف الجهاز" else "تعذر تسجيل الدخول: $code")
+            }
+            val pharmacyId = response.optString("pharmacyId")
+            val deviceId = response.optString("deviceId")
+            val role = response.optString("role")
+            if (pharmacyId.isBlank() || deviceId.isBlank() || response.optString("status") != "active") {
+                throw IOException("هذا الجهاز لم تتم الموافقة عليه بعد")
+            }
+            return PharmacyRegistration(
+                pharmacyId = pharmacyId,
+                pharmacyName = "صيدلية مرتبطة",
+                deviceId = deviceId,
+                token = token,
+                role = role
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     @Throws(IOException::class)
     fun registerPharmacy(pharmacyName: String, deviceName: String): PharmacyRegistration {
         require(pharmacyName.isNotBlank()) { "اكتب اسم الصيدلية" }
