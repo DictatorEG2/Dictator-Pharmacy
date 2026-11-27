@@ -275,27 +275,26 @@ class PharmacyViewModel(
     } 
     private suspend fun refreshCloudDebts() {
         val sales = withContext(Dispatchers.IO) { PharmacyDataApi.listAllSales(session.token) }
-        sales.filter { it.dueMinor > 0 || dao.debtByRemoteSaleId(it.id) != null }.forEach { sale ->
+        sales.forEachIndexed { index, sale ->
+            val oldDebt = dao.debtByRemoteSaleId(sale.id)
+            if (index >= 20 && sale.dueMinor <= 0 && oldDebt == null) return@forEachIndexed
             val details = withContext(Dispatchers.IO) { PharmacyDataApi.getSaleDetails(session.token, sale.id) }
-            val old = dao.debtByRemoteSaleId(sale.id)
-            val debtId = dao.upsertRemoteDebt(
-                CustomerDebt(
-                    id = old?.id ?: 0,
-                    customerName = sale.customerName ?: "عميل بدون اسم",
-                    totalAmount = sale.totalMinor / 100.0,
-                    paidAmount = sale.paidMinor / 100.0,
+
+            val oldSale = dao.saleByRemoteSaleId(sale.id)
+            val localSaleId = dao.upsertRemoteSale(
+                Sale(
+                    id = oldSale?.id ?: 0,
+                    total = sale.totalMinor / 100.0,
                     createdAt = sale.createdAt * 1000L,
-                    updatedAt = System.currentTimeMillis(),
                     remoteSaleId = sale.id
                 )
             )
-            dao.clearDebtItems(debtId)
-            dao.clearDebtPayments(debtId)
+            dao.clearSaleItems(localSaleId)
             if (details.items.isNotEmpty()) {
-                dao.insertDebtItems(details.items.map { item ->
-                    DebtItem(
-                        debtId = debtId,
-                        medicineId = dao.medicineByRemoteId(item.medicineId)?.id,
+                dao.insertSaleItems(details.items.map { item ->
+                    SaleItem(
+                        saleId = localSaleId,
+                        medicineId = dao.medicineByRemoteId(item.medicineId)?.id ?: 0L,
                         medicineName = item.medicineName,
                         unitPrice = item.unitPriceMinor / 100.0,
                         quantity = item.quantity,
@@ -303,15 +302,43 @@ class PharmacyViewModel(
                     )
                 })
             }
-            details.payments.forEach { payment ->
-                dao.insertDebtPayment(
-                    DebtPayment(
-                        debtId = debtId,
-                        amount = payment.amountMinor / 100.0,
-                        note = "دفعة سحابية",
-                        createdAt = payment.createdAt * 1000L
+
+            if (sale.dueMinor > 0 || oldDebt != null) {
+                val debtId = dao.upsertRemoteDebt(
+                    CustomerDebt(
+                        id = oldDebt?.id ?: 0,
+                        customerName = sale.customerName ?: "عميل بدون اسم",
+                        totalAmount = sale.totalMinor / 100.0,
+                        paidAmount = sale.paidMinor / 100.0,
+                        createdAt = sale.createdAt * 1000L,
+                        updatedAt = System.currentTimeMillis(),
+                        remoteSaleId = sale.id
                     )
                 )
+                dao.clearDebtItems(debtId)
+                dao.clearDebtPayments(debtId)
+                if (details.items.isNotEmpty()) {
+                    dao.insertDebtItems(details.items.map { item ->
+                        DebtItem(
+                            debtId = debtId,
+                            medicineId = dao.medicineByRemoteId(item.medicineId)?.id,
+                            medicineName = item.medicineName,
+                            unitPrice = item.unitPriceMinor / 100.0,
+                            quantity = item.quantity,
+                            lineTotal = item.lineTotalMinor / 100.0
+                        )
+                    })
+                }
+                details.payments.forEach { payment ->
+                    dao.insertDebtPayment(
+                        DebtPayment(
+                            debtId = debtId,
+                            amount = payment.amountMinor / 100.0,
+                            note = "دفعة سحابية",
+                            createdAt = payment.createdAt * 1000L
+                        )
+                    )
+                }
             }
         }
     }
