@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class PharmacyDatabase : RoomDatabase() {
@@ -54,13 +54,20 @@ abstract class PharmacyDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE sales ADD COLUMN remoteSaleId TEXT")
+                database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_sales_remoteSaleId ON sales(remoteSaleId)")
+            }
+        }
+
         @Volatile private var instance: PharmacyDatabase? = null
         fun get(context: Context, pharmacyId: String): PharmacyDatabase = Room.databaseBuilder(
             context.applicationContext,
             PharmacyDatabase::class.java,
             "dictator_pharmacy_" + pharmacyId.replace("-", "") + ".db"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
 }
