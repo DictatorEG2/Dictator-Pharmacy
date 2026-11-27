@@ -228,6 +228,56 @@ async function inventoryApi(request, env, device, url, path) {
 
 
 
+async function adjustInventoryApi(request, env, device, path) {
+  if (path !== "/v1/inventory/adjust" || request.method !== "POST") return null;
+  if (device.role !== "manager") return json({ error: "manager_required" }, 403);
+  const input = await body(request);
+  const medicineId = String(input.medicineId || "").trim();
+  const delta = input.delta;
+  const reason = validOptionalText(input.reason, 120) || "تعديل مخزون";
+  if (!/^[a-f0-9-]{36}$/i.test(medicineId) || !Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > 1000000)
+    return json({ error: "invalid_stock_adjustment" }, 400);
+  const medicine = await env.DB.prepare("SELECT id FROM medicines WHERE id=? AND pharmacy_id=? AND is_active=1")
+    .bind(medicineId, device.pharmacy_id).first();
+  if (!medicine) return json({ error: "medicine_not_found" }, 404);
+  const stamp = now();
+  if (delta > 0) {
+    const batchId = crypto.randomUUID(), movementId = crypto.randomUUID();
+    const results = await env.DB.batch([
+      env.DB.prepare("INSERT INTO inventory_batches(id,pharmacy_id,medicine_id,quantity,purchase_price_minor,created_at,updated_at) VALUES(?,?,?,?,0,?,?)")
+        .bind(batchId,device.pharmacy_id,medicineId,delta,stamp,stamp),
+      env.DB.prepare("INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ? WHERE EXISTS(SELECT 1 FROM inventory_batches WHERE id=? AND pharmacy_id=?)")
+        .bind(movementId,device.pharmacy_id,medicineId,batchId,device.id,delta,reason,stamp,batchId,device.pharmacy_id)
+    ]);
+    if (!results?.[0]?.meta?.changes || !results?.[1]?.meta?.changes) return json({error:"stock_adjustment_failed"},500);
+    await audit(env,device.pharmacy_id,device,"stock_adjusted",medicineId,{delta,reason});
+    return json({medicineId,delta,updated:true});
+  }
+  let remaining = -delta;
+  const today = new Date().toISOString().slice(0,10);
+  const batches = await env.DB.prepare("SELECT id,quantity FROM inventory_batches WHERE pharmacy_id=? AND medicine_id=? AND quantity>0 AND (expiry_date IS NULL OR expiry_date>=?) ORDER BY CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END,expiry_date,created_at,id")
+    .bind(device.pharmacy_id,medicineId,today).all();
+  const allocations = [];
+  for (const batch of batches.results || []) {
+    if (!remaining) break;
+    const take = Math.min(remaining,batch.quantity);
+    allocations.push({id:batch.id,take});
+    remaining -= take;
+  }
+  if (remaining) return json({error:"insufficient_stock",available:-delta-remaining,requested:-delta},409);
+  const statements = [];
+  for (const item of allocations) {
+    statements.push(env.DB.prepare("UPDATE inventory_batches SET quantity=quantity-?,updated_at=? WHERE id=? AND pharmacy_id=? AND quantity>=?")
+      .bind(item.take,stamp,item.id,device.pharmacy_id,item.take));
+    statements.push(env.DB.prepare("INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ? WHERE changes()=1")
+      .bind(crypto.randomUUID(),device.pharmacy_id,medicineId,item.id,device.id,-item.take,reason,stamp));
+  }
+  if (statements.length) await env.DB.batch(statements);
+  await audit(env,device.pharmacy_id,device,"stock_adjusted",medicineId,{delta,reason});
+  return json({medicineId,delta,updated:true});
+}
+
+
 async function customersApi(request, env, device, url, path) {
   const match = path.match(/^\/v1\/customers(?:\/([a-f0-9-]+))?$/i);
   if (!match) return null;
@@ -580,6 +630,8 @@ async function handle(request, env) {
   if (saleResponse) return saleResponse;
   const medicineResponse = await medicineApi(request, env, device, url, path);
   if (medicineResponse) return medicineResponse;
+  const adjustmentResponse = await adjustInventoryApi(request, env, device, path);
+  if (adjustmentResponse) return adjustmentResponse;
   const inventoryResponse = await inventoryApi(request, env, device, url, path);
   if (inventoryResponse) return inventoryResponse;
   return json({ error: "not_found" }, 404);
