@@ -33,6 +33,9 @@ abstract class MedicineDao {
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE remoteId IS NOT NULL")
     abstract suspend fun remoteMedicines(): List<Medicine>
 
+    @Query("DELETE FROM medicines WHERE remoteId IS NOT NULL")
+    abstract suspend fun clearRemoteMedicines()
+
     @Query("DELETE FROM medicines WHERE remoteId IS NOT NULL AND remoteId NOT IN (:remoteIds)")
     abstract suspend fun removeMissingRemoteMedicines(remoteIds: List<String>)
 
