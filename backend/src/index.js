@@ -274,15 +274,15 @@ async function adjustInventoryApi(request, env, device, path) {
     ") AND quantity>=(" + caseSql + "))=?")
     .bind(...caseArgs,stamp,device.pharmacy_id,...ids,...caseArgs,device.pharmacy_id,...ids,...caseArgs,allocations.length);
   const movementSelects = allocations.map(() =>
-    "SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ?"
+    "SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ? WHERE changes()=?"
   ).join(" UNION ALL ");
   const movementArgs = allocations.flatMap(item => [
-    crypto.randomUUID(),device.pharmacy_id,medicineId,item.id,device.id,-item.take,reason,stamp
+    crypto.randomUUID(),device.pharmacy_id,medicineId,item.id,device.id,-item.take,reason,stamp,allocations.length
   ]);
   const movementInsert = env.DB.prepare(
     "INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) " +
-    movementSelects + " WHERE changes()=?"
-  ).bind(...movementArgs,allocations.length);
+    movementSelects
+  ).bind(...movementArgs);
   const results = await env.DB.batch([update,movementInsert]);
   if ((results?.[0]?.meta?.changes || 0) !== allocations.length)
     return json({error:"stock_changed_retry"},409);
