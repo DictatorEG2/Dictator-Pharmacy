@@ -434,7 +434,10 @@ class PharmacyViewModel(
         }
     }
 
-    fun addMedicine(name: String, category: String, price: Double, quantity: Int) {
+    fun addMedicine(
+        name: String, category: String, price: Double, quantity: Int,
+        done: (Result<Unit>) -> Unit
+    ) {
         viewModelScope.launch {
             try {
                 require(session.role == "manager") { "إضافة الأدوية للمدير فقط" }
@@ -453,8 +456,9 @@ class PharmacyViewModel(
                         remoteId = remoteId
                     )
                 )
-            } catch (_: Exception) {
-                // Do not create a local-only medicine that would appear shared.
+                done(Result.success(Unit))
+            } catch (error: Exception) {
+                done(Result.failure(error))
             }
         }
     }
