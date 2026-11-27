@@ -223,6 +223,130 @@ async function inventoryApi(request, env, device, url, path) {
 }
 
 
+
+async function customersApi(request, env, device, url, path) {
+  const match = path.match(/^\/v1\/customers(?:\/([a-f0-9-]+))?$/i);
+  if (!match) return null;
+  const customerId = match[1] || null;
+  if (request.method === "GET" && !customerId) {
+    const q = validOptionalText(url.searchParams.get("q"), 100);
+    const pageRaw = Number(url.searchParams.get("page") || 1);
+    const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? Math.min(pageRaw, 100000) : 1;
+    const where = ["pharmacy_id=?"]; const values = [device.pharmacy_id];
+    if (q) {
+      where.push("(name LIKE ? OR phone LIKE ?)");
+      values.push("%" + q + "%", "%" + q + "%");
+    }
+    const result = await env.DB.prepare(`SELECT id,name,phone,notes,created_at,updated_at
+      FROM customers WHERE ${where.join(" AND ")}
+      ORDER BY name COLLATE NOCASE,id LIMIT 21 OFFSET ?`)
+      .bind(...values,(page-1)*20).all();
+    const rows = result.results || [];
+    return json({customers:rows.slice(0,20),page,pageSize:20,hasMore:rows.length>20,nextPage:rows.length>20?page+1:null});
+  }
+  if (request.method === "POST" && !customerId) {
+    const input = await body(request);
+    const name = String(input.name || "").trim().slice(0,120);
+    const phone = validOptionalText(input.phone,30);
+    const notes = validOptionalText(input.notes,500);
+    if (!name) return json({error:"customer_name_required"},400);
+    const id = crypto.randomUUID(), stamp = now();
+    await env.DB.prepare("INSERT INTO customers(id,pharmacy_id,name,phone,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+      .bind(id,device.pharmacy_id,name,phone,notes,stamp,stamp).run();
+    await audit(env,device.pharmacy_id,device,"customer_created",id);
+    return json({id,name,phone,notes},201);
+  }
+  if (request.method === "PUT" && customerId) {
+    const input = await body(request);
+    const name = String(input.name || "").trim().slice(0,120);
+    if (!name) return json({error:"customer_name_required"},400);
+    const phone = validOptionalText(input.phone,30), notes = validOptionalText(input.notes,500);
+    const result = await env.DB.prepare("UPDATE customers SET name=?,phone=?,notes=?,updated_at=? WHERE id=? AND pharmacy_id=?")
+      .bind(name,phone,notes,now(),customerId,device.pharmacy_id).run();
+    if (!result.meta?.changes) return json({error:"customer_not_found"},404);
+    await audit(env,device.pharmacy_id,device,"customer_updated",customerId);
+    return json({id:customerId,name,phone,notes});
+  }
+  return json({error:"method_not_allowed"},405);
+}
+
+async function salesReadApi(request, env, device, url, path) {
+  if (path === "/v1/sales" && request.method === "GET") {
+    const pageRaw = Number(url.searchParams.get("page") || 1);
+    const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? Math.min(pageRaw,100000) : 1;
+    const fromRaw = Number(url.searchParams.get("from") || 0);
+    const toRaw = Number(url.searchParams.get("to") || 0);
+    const from = Number.isSafeInteger(fromRaw) && fromRaw > 0 ? fromRaw : null;
+    const to = Number.isSafeInteger(toRaw) && toRaw > 0 ? toRaw : null;
+    const where = ["s.pharmacy_id=?"]; const values = [device.pharmacy_id];
+    if (from !== null) { where.push("s.created_at>=?"); values.push(from); }
+    if (to !== null) { where.push("s.created_at<?"); values.push(to); }
+    const result = await env.DB.prepare(`SELECT s.id,s.invoice_number,s.status,s.total_minor,s.created_at,
+      s.customer_id,c.name AS customer_name,
+      COALESCE((SELECT SUM(p.amount_minor) FROM sale_payments p WHERE p.sale_id=s.id AND p.pharmacy_id=s.pharmacy_id),0) AS paid_minor
+      FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.pharmacy_id=s.pharmacy_id
+      WHERE ${where.join(" AND ")} ORDER BY s.created_at DESC,s.id DESC LIMIT 21 OFFSET ?`)
+      .bind(...values,(page-1)*20).all();
+    const rows = (result.results || []).map(row => ({...row,due_minor:Math.max(0,row.total_minor-row.paid_minor)}));
+    return json({sales:rows.slice(0,20),page,pageSize:20,hasMore:rows.length>20,nextPage:rows.length>20?page+1:null});
+  }
+  const saleMatch = path.match(/^\/v1\/sales\/([a-f0-9-]+)$/i);
+  if (saleMatch && request.method === "GET") {
+    const saleId = saleMatch[1];
+    const sale = await env.DB.prepare(`SELECT s.id,s.invoice_number,s.status,s.total_minor,s.created_at,s.customer_id,
+      c.name AS customer_name,COALESCE((SELECT SUM(p.amount_minor) FROM sale_payments p WHERE p.sale_id=s.id AND p.pharmacy_id=s.pharmacy_id),0) AS paid_minor
+      FROM sales s LEFT JOIN customers c ON c.id=s.customer_id AND c.pharmacy_id=s.pharmacy_id
+      WHERE s.id=? AND s.pharmacy_id=?`).bind(saleId,device.pharmacy_id).first();
+    if (!sale) return json({error:"sale_not_found"},404);
+    const [items,payments] = await Promise.all([
+      env.DB.prepare("SELECT id,medicine_id,batch_id,medicine_name_snapshot,quantity,unit_price_minor,line_total_minor FROM sale_items WHERE sale_id=? AND pharmacy_id=? ORDER BY id")
+        .bind(saleId,device.pharmacy_id).all(),
+      env.DB.prepare("SELECT id,amount_minor,payment_method,notes,created_at FROM sale_payments WHERE sale_id=? AND pharmacy_id=? ORDER BY created_at,id")
+        .bind(saleId,device.pharmacy_id).all()
+    ]);
+    return json({...sale,due_minor:Math.max(0,sale.total_minor-sale.paid_minor),items:items.results||[],payments:payments.results||[]});
+  }
+  const paymentMatch = path.match(/^\/v1\/sales\/([a-f0-9-]+)\/payments$/i);
+  if (paymentMatch && request.method === "POST") {
+    const saleId = paymentMatch[1], input = await body(request);
+    const amount = input.amountMinor, method = String(input.paymentMethod || "cash");
+    const notes = validOptionalText(input.notes,250);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || !["cash","card","transfer","other"].includes(method))
+      return json({error:"invalid_payment"},400);
+    const paymentId = crypto.randomUUID(), stamp = now();
+    const result = await env.DB.prepare(`INSERT INTO sale_payments(id,pharmacy_id,sale_id,customer_id,device_id,amount_minor,payment_method,notes,created_at)
+      SELECT ?,s.pharmacy_id,s.id,s.customer_id,?,?,?, ?,?
+      FROM sales s WHERE s.id=? AND s.pharmacy_id=? AND s.status='completed'
+      AND ? <= s.total_minor-COALESCE((SELECT SUM(p.amount_minor) FROM sale_payments p WHERE p.sale_id=s.id AND p.pharmacy_id=s.pharmacy_id),0)`)
+      .bind(paymentId,device.id,amount,method,notes,stamp,saleId,device.pharmacy_id,amount).run();
+    if (!result.meta?.changes) return json({error:"sale_not_found_or_payment_exceeds_due"},409);
+    await audit(env,device.pharmacy_id,device,"sale_payment_recorded",paymentId,{saleId,amountMinor:amount});
+    return json({paymentId,saleId,amountMinor:amount,createdAt:stamp},201);
+  }
+  return null;
+}
+
+async function reportsApi(request, env, device, url, path) {
+  if (path !== "/v1/reports/summary" || request.method !== "GET") return null;
+  const from = Number(url.searchParams.get("from"));
+  const to = Number(url.searchParams.get("to"));
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from)
+    return json({error:"valid_from_and_to_required"},400);
+  const [summary,top] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS sale_count,COALESCE(SUM(s.total_minor),0) AS revenue_minor,
+      COALESCE(SUM((SELECT COALESCE(SUM(p.amount_minor),0) FROM sale_payments p WHERE p.sale_id=s.id AND p.pharmacy_id=s.pharmacy_id)),0) AS paid_minor
+      FROM sales s WHERE s.pharmacy_id=? AND s.status='completed' AND s.created_at>=? AND s.created_at<?`)
+      .bind(device.pharmacy_id,from,to).first(),
+    env.DB.prepare(`SELECT si.medicine_id,si.medicine_name_snapshot AS medicine_name,SUM(si.quantity) AS sold_quantity,
+      SUM(si.line_total_minor) AS revenue_minor FROM sale_items si JOIN sales s ON s.id=si.sale_id AND s.pharmacy_id=si.pharmacy_id
+      WHERE si.pharmacy_id=? AND s.status='completed' AND s.created_at>=? AND s.created_at<?
+      GROUP BY si.medicine_id,si.medicine_name_snapshot ORDER BY sold_quantity DESC,revenue_minor DESC LIMIT 10`)
+      .bind(device.pharmacy_id,from,to).all()
+  ]);
+  const revenue = summary?.revenue_minor || 0, paid = summary?.paid_minor || 0;
+  return json({from,to,saleCount:summary?.sale_count||0,revenueMinor:revenue,paidMinor:paid,dueMinor:Math.max(0,revenue-paid),topSelling:top.results||[]});
+}
+
 async function salesApi(request, env, device, path) {
   if (path !== "/v1/sales" || request.method !== "POST") return null;
   const input = await body(request);
@@ -441,6 +565,12 @@ async function handle(request, env) {
   if (!device) return json({ error: "authentication_required" }, 401);
   if (path === "/v1/me" && request.method === "GET")
     return json({ deviceId: device.id, deviceName: device.name, role: device.role, status: device.status, pharmacyId: device.pharmacy_id });
+  const customerResponse = await customersApi(request, env, device, url, path);
+  if (customerResponse) return customerResponse;
+  const salesReadResponse = await salesReadApi(request, env, device, url, path);
+  if (salesReadResponse) return salesReadResponse;
+  const reportsResponse = await reportsApi(request, env, device, url, path);
+  if (reportsResponse) return reportsResponse;
   const saleResponse = await salesApi(request, env, device, path);
   if (saleResponse) return saleResponse;
   const medicineResponse = await medicineApi(request, env, device, url, path);
