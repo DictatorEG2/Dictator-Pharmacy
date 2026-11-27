@@ -75,7 +75,7 @@ abstract class MedicineDao {
     @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE paidAmount >= totalAmount ORDER BY createdAt DESC LIMIT 100")
     abstract fun paidDebts(): Flow<List<CustomerDebtWithDetails>>
 
-    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE id = :id LIMIT 1")
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE id = :id LIMIT 1")
     abstract suspend fun debtById(id: Long): CustomerDebt?
     @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE remoteSaleId=:remoteSaleId LIMIT 1")
     abstract suspend fun debtByRemoteSaleId(remoteSaleId: String): CustomerDebt?
