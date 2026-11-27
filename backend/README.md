@@ -34,9 +34,11 @@ The existing database has migrations `0001_initial.sql`, `0002_multi_pharmacy.sq
 - `POST /v1/medicines` (device bearer token; create a medicine using `name`, optional `category`, `barcode`, `imageUrl`, `unit`, `salePriceMinor`, and `lowStockThreshold`)
 - `PUT /v1/medicines/{id}` (device bearer token; update an active medicine; send `name`, `salePriceMinor`, and `lowStockThreshold`, with optional metadata)
 - `DELETE /v1/medicines/{id}` (device bearer token; soft-deactivate the medicine without deleting its history)
+- `GET /v1/inventory/batches?medicineId=...&page=1` (device bearer token; pharmacy-scoped batch listing ordered by nearest expiry, 20 rows per page)
+- `POST /v1/inventory/batches` (device bearer token; receive stock for an active medicine; JSON fields: `medicineId`, positive integer `quantity`, optional `batchNumber`, optional ISO `expiryDate`, optional integer `purchasePriceMinor`; batch and purchase movement are written together)
 
 ## Current limitations
-- The Worker implements pharmacy registration, device enrollment, and a tenant-scoped medicine catalog API. Inventory batches, sales, customer ledger, and synchronization endpoints/conflict-resolution logic are still pending.
+- The Worker implements pharmacy registration, device enrollment, a tenant-scoped medicine catalog, and inventory batch receiving/listing. Sales, customer ledger, and synchronization endpoints/conflict-resolution logic are still pending.
 - Backup/restore and Android registration/synchronization UI are not implemented yet.
 - Do not use real pharmacy data until those features and tenant-isolation tests are complete.
 - Before production launch, add stronger abuse protection (for example Turnstile), monitoring, retention policies, and automated tests for cross-tenant access.
