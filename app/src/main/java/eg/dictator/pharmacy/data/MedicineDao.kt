@@ -30,6 +30,70 @@ abstract class MedicineDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertSale(sale: Sale): Long
 
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertDebt(debt: CustomerDebt): Long
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertDebtItems(items: List<DebtItem>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertDebtPayment(payment: DebtPayment)
+
+    @Query("UPDATE customer_debts SET paidAmount = :paid, updatedAt = :now WHERE id = :debtId AND paidAmount <= totalAmount AND :paid <= totalAmount")
+    abstract suspend fun updateDebtPaidAmount(debtId: Long, paid: Double, now: Long): Int
+
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE paidAmount < totalAmount ORDER BY CASE WHEN :sort = 0 THEN customerName END COLLATE NOCASE ASC, CASE WHEN :sort = 1 THEN (totalAmount - paidAmount) END DESC, CASE WHEN :sort = 2 THEN createdAt END DESC, CASE WHEN :sort = 3 THEN createdAt END ASC, createdAt DESC LIMIT 500")
+    abstract fun activeDebts(sort: Int): Flow<List<CustomerDebtWithDetails>>
+
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE paidAmount >= totalAmount ORDER BY createdAt DESC LIMIT 100")
+    abstract fun paidDebts(): Flow<List<CustomerDebtWithDetails>>
+
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE id = :id LIMIT 1")
+    abstract suspend fun debtById(id: Long): CustomerDebt?
+    
+    @Transaction
+    open suspend fun createDebt(customerName: String, lines: List<DebtLineRequest>, initialPayment: Double): Long {
+        require(customerName.isNotBlank()) { "اكتب اسم العميل" }
+        require(lines.isNotEmpty() && lines.all { it.quantity > 0 }) { "أضف صنفًا واحدًا على الأقل" }
+        require(initialPayment >= 0.0) { "الدفعة غير صحيحة" }
+        val merged = lines.groupBy { it.medicineId }.mapValues { (_, rows) -> rows.sumOf { it.quantity } }
+        val details = merged.map { (id, quantity) ->
+            val medicine = medicineById(id) ?: error("أحد الأصناف لم يعد موجودًا")
+            require(medicine.sellingPrice >= 0.0) { "سعر غير صالح" }
+            Triple(medicine, quantity, medicine.sellingPrice)
+        }
+        val total = details.sumOf { (_, quantity, price) -> quantity * price }
+        require(total > 0.0 && initialPayment <= total) { "الدفعة أكبر من إجمالي المديونية" }
+        val now = System.currentTimeMillis()
+        val debtId = insertDebt(CustomerDebt(customerName = customerName.trim(), totalAmount = total, paidAmount = initialPayment, createdAt = now, updatedAt = now))
+        insertDebtItems(details.map { (medicine, quantity, price) ->
+            DebtItem(debtId = debtId, medicineId = medicine.id, medicineName = medicine.name, unitPrice = price, quantity = quantity, lineTotal = price * quantity)
+        })
+        if (initialPayment > 0.0) insertDebtPayment(DebtPayment(debtId = debtId, amount = initialPayment, note = "دفعة عند إنشاء المديونية", createdAt = now))
+        return debtId
+    }
+
+    @Transaction
+    open suspend fun recordDebtPayment(debtId: Long, amount: Double) {
+        require(amount.isFinite() && amount > 0.0) { "أدخل مبلغًا صحيحًا أكبر من صفر" }
+        val debt = debtById(debtId) ?: error("المديونية غير موجودة")
+        val remaining = debt.totalAmount - debt.paidAmount
+        require(amount <= remaining + 0.000001) { "المبلغ أكبر من المتبقي: %.2f".format(remaining) }
+        val now = System.currentTimeMillis()
+        check(updateDebtPaidAmount(debtId, debt.paidAmount + amount, now) == 1) { "تعذر تحديث المديونية" }
+        insertDebtPayment(DebtPayment(debtId = debtId, amount = amount, note = "دفعة جزئية", createdAt = now))
+    }
+
+    @Transaction
+    open suspend fun markDebtPaid(debtId: Long) {
+        val debt = debtById(debtId) ?: error("المديونية غير موجودة")
+        val remaining = debt.totalAmount - debt.paidAmount
+        if (remaining <= 0.000001) return
+        val now = System.currentTimeMillis()
+        check(updateDebtPaidAmount(debtId, debt.totalAmount, now) == 1) { "تعذر تسوية المديونية" }
+        insertDebtPayment(DebtPayment(debtId = debtId, amount = remaining, note = "تسوية كاملة", createdAt = now))
+    }
+
     @Transaction
     @Query("SELECT * FROM sales ORDER BY createdAt DESC LIMIT 100")
     abstract fun recentSales(): Flow<List<SaleWithItems>>
