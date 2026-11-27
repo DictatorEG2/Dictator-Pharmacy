@@ -15,7 +15,7 @@ abstract class MedicineDao {
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines ORDER BY name COLLATE NOCASE LIMIT 500")
     abstract fun allMedicines(): Flow<List<Medicine>>
 
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines WHERE quantity <= 0 ORDER BY name COLLATE NOCASE LIMIT 500")
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE quantity <= 0 ORDER BY name COLLATE NOCASE LIMIT 500")
     abstract fun outOfStock(): Flow<List<Medicine>>
 
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines WHERE quantity > 0 AND quantity <= minimumQuantity ORDER BY quantity ASC LIMIT 500")
