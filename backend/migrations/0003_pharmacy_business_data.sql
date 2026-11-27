@@ -1,7 +1,5 @@
--- Pharmacy business data: tenant-scoped catalog, stock, sales and customer ledger.
 PRAGMA foreign_keys = ON;
 
--- Composite parent key lets SQLite enforce device ownership in tenant-scoped foreign keys.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_id_pharmacy
   ON devices(id, pharmacy_id);
 
@@ -142,7 +140,6 @@ CREATE INDEX IF NOT EXISTS idx_sale_payments_pharmacy_sale
 CREATE INDEX IF NOT EXISTS idx_sale_payments_pharmacy_customer
   ON sale_payments(pharmacy_id, customer_id, created_at DESC);
 
--- Idempotency ledger prevents a retried offline sync request from applying twice.
 CREATE TABLE IF NOT EXISTS sync_operations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pharmacy_id TEXT NOT NULL REFERENCES pharmacies(id),
