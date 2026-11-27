@@ -38,3 +38,6 @@ Do not use the app for live pharmacy operations until sales, synchronization, ba
 
 ## Build
 Open the project in Android Studio with JDK 17 and Android SDK 35, sync Gradle, then build the app module.
+
+## Cloudflare backend foundation
+The initial Worker and D1 schema are in `backend/`. They implement one-time manager bootstrap, expiring single-use invitations, pending staff enrollment, manager approval/revocation, and hashed device-token storage. This is an enrollment foundation only; the Worker is not deployed and inventory/sales/debt synchronization is not implemented yet. Follow `backend/README.md` to create the D1 database, configure the database ID and bootstrap secret, apply migrations, and deploy. Do not put the bootstrap secret in the Android app.
