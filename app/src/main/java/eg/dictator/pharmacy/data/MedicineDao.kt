@@ -68,6 +68,18 @@ abstract class MedicineDao {
 
     @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE id = :id LIMIT 1")
     abstract suspend fun debtById(id: Long): CustomerDebt?
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE remoteSaleId=:remoteSaleId LIMIT 1")
+    abstract suspend fun debtByRemoteSaleId(remoteSaleId: String): CustomerDebt?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun upsertRemoteDebt(debt: CustomerDebt): Long
+
+    @Query("DELETE FROM debt_items WHERE debtId=:debtId")
+    abstract suspend fun clearDebtItems(debtId: Long)
+
+    @Query("DELETE FROM debt_payments WHERE debtId=:debtId")
+    abstract suspend fun clearDebtPayments(debtId: Long)
+
 
     @Query("UPDATE customer_debts SET remoteSaleId=:remoteSaleId WHERE id=:debtId")
     abstract suspend fun setDebtRemoteSaleId(debtId: Long, remoteSaleId: String)
