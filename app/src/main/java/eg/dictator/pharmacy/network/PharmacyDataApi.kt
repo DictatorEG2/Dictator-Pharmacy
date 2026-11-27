@@ -87,6 +87,12 @@ object PharmacyDataApi {
             .takeIf { it.isNotBlank() } ?: throw IOException("لم يصل معرّف دفعة المخزون")
     }
 
+    fun adjustStock(token: String, medicineId: String, delta: Int, reason: String) {
+        val body = JSONObject().put("medicineId", medicineId)
+            .put("delta", delta).put("reason", reason)
+        request("/v1/inventory/adjust", "POST", token, body)
+    }
+
     fun createSale(
         token: String, operationId: String, items: List<Pair<String, Int>>,
         customerId: String? = null, paymentAmountMinor: Long = 0,
