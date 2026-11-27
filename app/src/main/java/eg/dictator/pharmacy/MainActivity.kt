@@ -451,12 +451,15 @@ private fun SalesReportDialog(
                 Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("اليوم", "الأسبوع", "الشهر").forEachIndexed { index, label ->
-                        SegmentedButton(
-                            selected = period == index,
+                        OutlinedButton(
                             onClick = { applyPeriod(index) },
-                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3)
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (period == index) Crimson else Color.Transparent,
+                                contentColor = Color.White
+                            )
                         ) { Text(label) }
                     }
                 }
