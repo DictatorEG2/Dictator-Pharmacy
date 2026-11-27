@@ -75,7 +75,7 @@ async function createPharmacy(request, env) {
 }
 
 function normalizeMedicineName(value) {
-  return String(value || "").normalize("NFKC").trim().toLocaleLowerCase().replace(/\\s+/g, " ");
+  return String(value || "").normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/g, " ");
 }
 function validOptionalText(value, max) {
   if (value == null || value === "") return null;
@@ -83,7 +83,7 @@ function validOptionalText(value, max) {
   return text ? text.slice(0, max) : null;
 }
 async function medicineApi(request, env, device, url, path) {
-  const match = path.match(/^\\/v1\\/medicines(?:\\/([a-f0-9-]+))?$/i);
+  const match = path.match(/^\/v1\/medicines(?:\/([a-f0-9-]+))?$/i);
   if (!match) return null;
   const medicineId = match[1] || null;
   if (request.method === "GET" && !medicineId) {
