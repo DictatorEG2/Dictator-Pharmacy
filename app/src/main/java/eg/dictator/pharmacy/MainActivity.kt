@@ -840,6 +840,7 @@ private fun ManagerDashboardDialog(
 private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
     var devices by remember { mutableStateOf<List<PharmacyDevice>>(emptyList()) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
+    var approvedDeviceToken by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -888,6 +889,18 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                 colors = ButtonDefaults.buttonColors(containerColor = Crimson)
             ) { Text(if (loading) "جارٍ التنفيذ..." else "إنشاء دعوة لموظف") }
 
+            approvedDeviceToken?.let { token ->
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("رمز دخول الجهاز بعد الموافقة — يظهر مرة واحدة", color = Color(0xFFFFC36B))
+                        Text(token, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(token)) }) {
+                            Text("نسخ رمز الجهاز")
+                        }
+                    }
+                }
+            }
+
             inviteCode?.let { code ->
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -924,8 +937,10 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                                     loading = true
                                     scope.launch {
                                         try {
-                                            withContext(Dispatchers.IO) { ManagerApi.approveDevice(session.token, device.id) }
-                                            message = "تمت الموافقة. يجب تسجيل دخول الجهاز بعد الموافقة لاستلام رمز الدخول."
+                                            approvedDeviceToken = withContext(Dispatchers.IO) {
+                                                ManagerApi.approveDevice(session.token, device.id)
+                                            }
+                                            message = "تمت الموافقة. انسخ رمز الجهاز وأرسله للموظف مرة واحدة."
                                             refreshDevices()
                                         } catch (error: Exception) {
                                             message = error.message ?: "تعذرت الموافقة"
