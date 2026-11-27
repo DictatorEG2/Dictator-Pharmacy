@@ -29,11 +29,12 @@ data class StockMovement(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "sales", indices = [Index("createdAt")])
+@Entity(tableName = "sales", indices = [Index("createdAt"), Index(value = ["remoteSaleId"], unique = true)])
 data class Sale(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val total: Double,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val remoteSaleId: String? = null
 )
 
 @Entity(
