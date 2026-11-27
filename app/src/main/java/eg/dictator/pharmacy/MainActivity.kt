@@ -30,6 +30,15 @@ import eg.dictator.pharmacy.data.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+private fun startOfDay(): Long {
+    val calendar = java.util.Calendar.getInstance()
+    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    calendar.set(java.util.Calendar.MINUTE, 0)
+    calendar.set(java.util.Calendar.SECOND, 0)
+    calendar.set(java.util.Calendar.MILLISECOND, 0)
+    return calendar.timeInMillis
+}
+
 private val Ink = Color(0xFF101116)
 private val Panel = Color(0xFF1A1C24)
 private val Crimson = Color(0xFF650D24)
@@ -56,6 +65,23 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val outOfStock = dao.outOfStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentSales = dao.recentSales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val reportFrom = MutableStateFlow(startOfDay())
+    private val reportTo = MutableStateFlow(startOfDay() + 24L * 60 * 60 * 1000)
+    val reportRevenue = combine(reportFrom, reportTo) { from, to -> from to to }
+        .flatMapLatest { (from, to) -> dao.revenueBetween(from, to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    val reportCount = combine(reportFrom, reportTo) { from, to -> from to to }
+        .flatMapLatest { (from, to) -> dao.salesCountBetween(from, to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val reportTopSelling = combine(reportFrom, reportTo) { from, to -> from to to }
+        .flatMapLatest { (from, to) -> dao.topSelling(from, to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun setReportRange(from: Long, to: Long) {
+        reportFrom.value = from
+        reportTo.value = to
+    }
 
     fun addMedicine(name: String, category: String, price: Double, quantity: Int) {
         viewModelScope.launch {
@@ -87,11 +113,16 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
     var search by remember { mutableStateOf("") }
     var showAdd by remember { mutableStateOf(false) }
     var showSale by remember { mutableStateOf(false) }
+    var showReports by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
+    val recentSales by vm.recentSales.collectAsState()
+    val reportRevenue by vm.reportRevenue.collectAsState()
+    val reportCount by vm.reportCount.collectAsState()
+    val reportTopSelling by vm.reportTopSelling.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
     val visibleMedicines = when (selectedTab) {
         1 -> lowStock
@@ -125,6 +156,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             )
             Spacer(Modifier.height(12.dp))
             Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
@@ -183,6 +216,15 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             }
         }
     }
+
+    if (showReports) SalesReportDialog(
+        sales = recentSales,
+        revenue = reportRevenue,
+        salesCount = reportCount,
+        topSelling = reportTopSelling,
+        onRangeChanged = vm::setReportRange,
+        onDismiss = { showReports = false }
+    )
 
     if (showSale) SaleDialog(
         medicines = allMedicines,
@@ -354,5 +396,109 @@ private fun SaleDialog(
             }) { Text(if (saving) "جارٍ الحفظ..." else "تأكيد البيع") }
         },
         dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } }
+    )
+}
+
+
+@Composable
+private fun SalesReportDialog(
+    sales: List<SaleWithItems>,
+    revenue: Double,
+    salesCount: Int,
+    topSelling: List<TopSellingMedicine>,
+    onRangeChanged: (Long, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var period by remember { mutableIntStateOf(0) }
+    var expandedSale by remember { mutableStateOf<Long?>(null) }
+
+    fun applyPeriod(selected: Int) {
+        val now = java.util.Calendar.getInstance()
+        val start = java.util.Calendar.getInstance()
+        when (selected) {
+            0 -> {
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            1 -> {
+                start.set(java.util.Calendar.DAY_OF_WEEK, start.firstDayOfWeek)
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            else -> {
+                start.set(java.util.Calendar.DAY_OF_MONTH, 1)
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+        }
+        period = selected
+        onRangeChanged(start.timeInMillis, now.timeInMillis + 1)
+    }
+
+    LaunchedEffect(Unit) { applyPeriod(0) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("تقارير المبيعات") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf("اليوم", "الأسبوع", "الشهر").forEachIndexed { index, label ->
+                        SegmentedButton(
+                            selected = period == index,
+                            onClick = { applyPeriod(index) },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = 3)
+                        ) { Text(label) }
+                    }
+                }
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text("إجمالي المبيعات", color = Muted)
+                        Text("%.2f ج.م".format(revenue), color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("عدد الفواتير: $salesCount", color = Muted)
+                    }
+                }
+                Text("الأكثر مبيعًا", fontWeight = FontWeight.Bold)
+                if (topSelling.isEmpty()) Text("لا توجد مبيعات في هذه الفترة.", color = Muted)
+                topSelling.forEachIndexed { index, item ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${index + 1}. ${item.medicineName}")
+                            Text("الكمية: ${item.soldQuantity}", color = Muted)
+                        }
+                        Text("%.2f ج.م".format(item.revenue))
+                    }
+                }
+                Divider()
+                Text("آخر الفواتير", fontWeight = FontWeight.Bold)
+                if (sales.isEmpty()) Text("لا توجد فواتير مسجلة.", color = Muted)
+                sales.forEach { entry ->
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                        Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                            TextButton(onClick = {
+                                expandedSale = if (expandedSale == entry.sale.id) null else entry.sale.id
+                            }) {
+                                Text("فاتورة #${entry.sale.id} • ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(entry.sale.createdAt))} • %.2f ج.م".format(entry.sale.total))
+                            }
+                            if (expandedSale == entry.sale.id) {
+                                entry.items.forEach { item ->
+                                    Text("${item.medicineName} — ${item.quantity} × ${item.unitPrice} = ${item.lineTotal} ج.م", color = Muted)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
     )
 }
