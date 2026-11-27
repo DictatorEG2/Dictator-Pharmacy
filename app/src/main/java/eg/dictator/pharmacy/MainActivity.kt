@@ -83,6 +83,8 @@ class MainActivity : ComponentActivity() {
 private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) -> Unit) {
     var pharmacyName by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf("جهاز المدير") }
+    var signInMode by remember { mutableStateOf(false) }
+    var deviceToken by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -98,51 +100,95 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Divider(color = Crimson)
             Text("ابدأ بإعداد صيدليتك", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("أنشئ مساحة مستقلة لصيدليتك. هذا الجهاز سيصبح جهاز المدير الأول، ويمكن إضافة الموظفين لاحقًا بدعوات.", color = Muted)
-            OutlinedTextField(
-                value = pharmacyName, onValueChange = { pharmacyName = it.take(100); error = null },
-                modifier = Modifier.fillMaxWidth(), label = { Text("اسم الصيدلية") },
-                singleLine = true, enabled = !loading
-            )
-            OutlinedTextField(
-                value = deviceName, onValueChange = { deviceName = it.take(80); error = null },
-                modifier = Modifier.fillMaxWidth(), label = { Text("اسم هذا الجهاز") },
-                singleLine = true, enabled = !loading
-            )
-            error?.let { Text(it, color = Color(0xFFFF7777)) }
-            Button(
-                onClick = {
-                    if (pharmacyName.isBlank() || deviceName.isBlank()) {
-                        error = "اكتب اسم الصيدلية واسم الجهاز أولًا"
-                    } else {
-                        loading = true
-                        error = null
-                        scope.launch {
-                            try {
-                                val created = withContext(Dispatchers.IO) {
-                                    PharmacyApi.registerPharmacy(pharmacyName, deviceName)
-                                }
-                                val saved = SecureSessionStore.Session(
-                                    token = created.token, pharmacyId = created.pharmacyId,
-                                    pharmacyName = created.pharmacyName, deviceId = created.deviceId,
-                                    role = created.role
-                                )
-                                SecureSessionStore.save(context, saved)
-                                onRegistered(saved)
-                            } catch (e: Exception) {
-                                error = e.message ?: "تعذر الاتصال بالخادم"
-                            } finally {
-                                loading = false
+            TextButton(onClick = { signInMode = !signInMode; error = null }) {
+                Text(if (signInMode) "إنشاء صيدلية جديدة" else "لدي رمز دخول من مدير الصيدلية")
+            }
+            if (signInMode) {
+                Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color.White, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = deviceToken, onValueChange = { deviceToken = it.trim(); error = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("رمز دخول الجهاز") },
+                    singleLine = true, enabled = !loading
+                )
+                error?.let { Text(it, color = Color(0xFFFF7777)) }
+                Button(
+                    onClick = {
+                        if (deviceToken.length < 32) {
+                            error = "أدخل رمز الدخول الذي أرسله مدير الصيدلية"
+                        } else {
+                            loading = true
+                            error = null
+                            scope.launch {
+                                try {
+                                    val signedIn = withContext(Dispatchers.IO) {
+                                        PharmacyApi.signInWithDeviceToken(deviceToken)
+                                    }
+                                    val saved = SecureSessionStore.Session(
+                                        token = signedIn.token, pharmacyId = signedIn.pharmacyId,
+                                        pharmacyName = signedIn.pharmacyName, deviceId = signedIn.deviceId,
+                                        role = signedIn.role
+                                    )
+                                    SecureSessionStore.save(context, saved)
+                                    onRegistered(saved)
+                                } catch (e: Exception) {
+                                    error = e.message ?: "تعذر تسجيل الدخول"
+                                } finally { loading = false }
                             }
                         }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(), enabled = !loading,
-                colors = ButtonDefaults.buttonColors(containerColor = Crimson)
-            ) {
-                if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                else Text("إنشاء الصيدلية")
+                    },
+                    modifier = Modifier.fillMaxWidth(), enabled = !loading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Crimson)
+                ) {
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    else Text("تسجيل الدخول")
+                }
+            } else {
+                OutlinedTextField(
+                    value = pharmacyName, onValueChange = { pharmacyName = it.take(100); error = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("اسم الصيدلية") },
+                    singleLine = true, enabled = !loading
+                )
+                OutlinedTextField(
+                    value = deviceName, onValueChange = { deviceName = it.take(80); error = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("اسم هذا الجهاز") },
+                    singleLine = true, enabled = !loading
+                )
+                error?.let { Text(it, color = Color(0xFFFF7777)) }
+                Button(
+                    onClick = {
+                        if (pharmacyName.isBlank() || deviceName.isBlank()) {
+                            error = "اكتب اسم الصيدلية واسم الجهاز أولًا"
+                        } else {
+                            loading = true
+                            error = null
+                            scope.launch {
+                                try {
+                                    val created = withContext(Dispatchers.IO) {
+                                        PharmacyApi.registerPharmacy(pharmacyName, deviceName)
+                                    }
+                                    val saved = SecureSessionStore.Session(
+                                        token = created.token, pharmacyId = created.pharmacyId,
+                                        pharmacyName = created.pharmacyName, deviceId = created.deviceId,
+                                        role = created.role
+                                    )
+                                    SecureSessionStore.save(context, saved)
+                                    onRegistered(saved)
+                                } catch (e: Exception) {
+                                    error = e.message ?: "تعذر الاتصال بالخادم"
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(), enabled = !loading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Crimson)
+                ) {
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    else Text("إنشاء الصيدلية")
+                }
+                Text("بإنشاء الصيدلية يصبح هذا الجهاز مديرًا. لا تشارك رمز الجهاز مع أي شخص.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Text("بإنشاء الصيدلية يصبح هذا الجهاز مديرًا. لا تشارك رمز الجهاز مع أي شخص.", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
