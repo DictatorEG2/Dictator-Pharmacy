@@ -84,6 +84,8 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
     var pharmacyName by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf("جهاز المدير") }
     var signInMode by remember { mutableStateOf(false) }
+    var joinMode by remember { mutableStateOf(false) }
+    var inviteCode by remember { mutableStateOf("") }
     var deviceToken by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -100,8 +102,10 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Divider(color = Crimson)
             Text("ابدأ بإعداد صيدليتك", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("أنشئ مساحة مستقلة لصيدليتك. هذا الجهاز سيصبح جهاز المدير الأول، ويمكن إضافة الموظفين لاحقًا بدعوات.", color = Muted)
-            TextButton(onClick = { signInMode = !signInMode; error = null }) {
-                Text(if (signInMode) "إنشاء صيدلية جديدة" else "لدي رمز دخول من مدير الصيدلية")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { signInMode = false; joinMode = false; error = null }) { Text("إنشاء") }
+                TextButton(onClick = { signInMode = false; joinMode = true; error = null }) { Text("انضمام") }
+                TextButton(onClick = { signInMode = true; joinMode = false; error = null }) { Text("تسجيل الدخول") }
             }
             if (signInMode) {
                 Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color.White, fontWeight = FontWeight.Bold)
@@ -142,6 +146,42 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                     else Text("تسجيل الدخول")
                 }
+            } else if (joinMode) {
+                Text("الانضمام إلى صيدلية موجودة", color = Color.White, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = inviteCode, onValueChange = { inviteCode = it.filter { ch -> ch.isLetterOrDigit() }.take(16).uppercase(); error = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("رمز دعوة المدير") },
+                    singleLine = true, enabled = !loading
+                )
+                OutlinedTextField(
+                    value = deviceName, onValueChange = { deviceName = it.take(80); error = null },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("اسم هذا الجهاز") },
+                    singleLine = true, enabled = !loading
+                )
+                error?.let { Text(it, color = Color(0xFFFF7777)) }
+                Button(
+                    onClick = {
+                        loading = true
+                        error = null
+                        scope.launch {
+                            try {
+                                val result = withContext(Dispatchers.IO) {
+                                    PharmacyApi.requestEnrollment(inviteCode, deviceName)
+                                }
+                                error = "تم إرسال طلب الانضمام. اطلب من المدير الموافقة على هذا الجهاز، ثم أدخل رمز الدخول الذي سيظهر لديه."
+                                inviteCode = ""
+                            } catch (e: Exception) {
+                                error = e.message ?: "تعذر إرسال طلب الانضمام"
+                            } finally { loading = false }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(), enabled = !loading && inviteCode.length == 16 && deviceName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Blue)
+                ) {
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    else Text("إرسال طلب الانضمام")
+                }
+                Text("بعد موافقة المدير، سيعطيك رمز دخول خاص بهذا الجهاز.", color = Muted, style = MaterialTheme.typography.bodySmall)
             } else {
                 OutlinedTextField(
                     value = pharmacyName, onValueChange = { pharmacyName = it.take(100); error = null },
