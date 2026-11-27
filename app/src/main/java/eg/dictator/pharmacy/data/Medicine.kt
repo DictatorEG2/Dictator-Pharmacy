@@ -65,3 +65,50 @@ data class TopSellingMedicine(
     val soldQuantity: Int,
     val revenue: Double
 )
+
+
+@Entity(tableName = "customer_debts", indices = [Index("createdAt"), Index("customerName")])
+data class CustomerDebt(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val customerName: String,
+    val totalAmount: Double,
+    val paidAmount: Double = 0.0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "debt_items",
+    foreignKeys = [ForeignKey(entity = CustomerDebt::class, parentColumns = ["id"], childColumns = ["debtId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("debtId"), Index("medicineId")]
+)
+data class DebtItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val debtId: Long,
+    val medicineId: Long?,
+    val medicineName: String,
+    val unitPrice: Double,
+    val quantity: Int,
+    val lineTotal: Double
+)
+
+@Entity(
+    tableName = "debt_payments",
+    foreignKeys = [ForeignKey(entity = CustomerDebt::class, parentColumns = ["id"], childColumns = ["debtId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("debtId"), Index("createdAt")]
+)
+data class DebtPayment(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val debtId: Long,
+    val amount: Double,
+    val note: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class DebtLineRequest(val medicineId: Long, val quantity: Int)
+
+data class CustomerDebtWithDetails(
+    @androidx.room.Embedded val debt: CustomerDebt,
+    @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val items: List<DebtItem>,
+    @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val payments: List<DebtPayment>
+)
