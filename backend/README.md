@@ -13,11 +13,11 @@ Cloudflare Worker + D1 API for independent pharmacies (multi-tenant).
 - The Android app must store device tokens in Android Keystore-backed encrypted storage.
 
 ## Required database migrations
-The existing database already has migrations `0001_initial.sql` and `0002_multi_pharmacy.sql` applied. Apply `migrations/0003_pharmacy_business_data.sql` once to the same D1 database before deploying business-data API endpoints. Run the SQL in Cloudflare D1 Console. Do not rerun migrations containing schema changes.
+The existing database has migrations `0001_initial.sql`, `0002_multi_pharmacy.sql`, and `0003_pharmacy_business_data.sql` applied. Apply the new `migrations/0004_walk_in_sale_payments.sql` exactly once to the same D1 database. It rebuilds `sale_payments` to allow a nullable customer for walk-in sales while preserving existing payment rows. Run the SQL in Cloudflare D1 Console. Never rerun an applied migration.
 
 ## Deploy
 1. Confirm the D1 binding is named `DB` and points to `dictator-pharmacy`.
-2. Apply any pending migration exactly once (currently `0003_pharmacy_business_data.sql`).
+2. Apply any pending migration exactly once (currently `0004_walk_in_sale_payments.sql` for databases that already applied `0003`).
 3. Configure the `RATE_LIMIT_SALT` Worker secret.
 4. Deploy this Worker from the `backend` directory with `npx wrangler deploy`.
 
@@ -32,7 +32,7 @@ The existing database already has migrations `0001_initial.sql` and `0002_multi_
 - `GET /v1/me` (device bearer token)
 
 ## Current limitations
-- The current Worker implements pharmacy registration and device enrollment. The `0003` migration adds tenant-scoped tables for medicines, expiring stock batches, sales, sale items, stock movements, customers, payments, and sync idempotency; corresponding data endpoints and conflict-resolution logic are still pending.
+- The current Worker implements pharmacy registration and device enrollment only. Migrations `0003` and `0004` provide tenant-scoped business tables; medicine, inventory, sales, customer-ledger, and synchronization endpoints and conflict-resolution logic are still pending.
 - Backup/restore and Android registration/synchronization UI are not implemented yet.
 - Do not use real pharmacy data until those features and tenant-isolation tests are complete.
 - Before production launch, add stronger abuse protection (for example Turnstile), monitoring, retention policies, and automated tests for cross-tenant access.
