@@ -41,10 +41,12 @@ abstract class PharmacyDatabase : RoomDatabase() {
         }
 
         @Volatile private var instance: PharmacyDatabase? = null
-        fun get(context: Context): PharmacyDatabase = instance ?: synchronized(this) {
-            instance ?: Room.databaseBuilder(context.applicationContext, PharmacyDatabase::class.java, "dictator_pharmacy.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
-                .build().also { instance = it }
-        }
+        fun get(context: Context, pharmacyId: String): PharmacyDatabase = Room.databaseBuilder(
+            context.applicationContext,
+            PharmacyDatabase::class.java,
+            "dictator_pharmacy_" + pharmacyId.replace("-", "") + ".db"
+        )
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .build()
     }
 }
