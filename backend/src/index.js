@@ -83,9 +83,24 @@ async function handle(request, env) {
     return json({ error: "legacy_global_setup_disabled", use: "POST /v1/pharmacies" }, 410);
 
   if (path === "/v1/enroll" && request.method === "POST") {
+    const rateLimitSalt = env.RATE_LIMIT_SALT;
+    if (typeof rateLimitSalt !== "string" || rateLimitSalt.length < 32) {
+      return json({ error: "registration_security_not_configured" }, 503);
+    }
+    const ip = request.headers.get("cf-connecting-ip") || "unknown";
+    const ipHash = await hash("enroll:" + ip + rateLimitSalt);
+    const timestamp = now();
+    const limit = await env.DB.prepare(`INSERT INTO registration_limits(ip_hash,window_started_at,attempts) VALUES(?,?,1)
+      ON CONFLICT(ip_hash) DO UPDATE SET
+        attempts=CASE WHEN registration_limits.window_started_at<=? THEN 1 ELSE registration_limits.attempts+1 END,
+        window_started_at=CASE WHEN registration_limits.window_started_at<=? THEN excluded.window_started_at ELSE registration_limits.window_started_at END
+      RETURNING attempts`)
+      .bind(ipHash, timestamp, timestamp - 3600, timestamp - 3600).first();
+    if ((limit?.attempts || 0) > 20) return json({ error: "enrollment_rate_limited", retryAfterSeconds: 3600 }, 429);
+
     const input = await body(request), code = String(input.code || "").trim().toUpperCase();
     const name = String(input.deviceName || "").trim().slice(0, 80);
-    if (!/^[A-F0-9]{12}$/.test(code) || !name) return json({ error: "invalid_code_or_device_name" }, 400);
+    if (!/^[A-F0-9]{16}$/.test(code) || !name) return json({ error: "invalid_code_or_device_name" }, 400);
     const codeHash = await hash(code), timestamp = now();
     const invite = await env.DB.prepare("SELECT i.code_hash,i.pharmacy_id,i.expires_at,i.used_at FROM invitations i JOIN pharmacies p ON p.id=i.pharmacy_id WHERE i.code_hash=? AND p.status='active'").bind(codeHash).first();
     if (!invite || invite.used_at || invite.expires_at < timestamp || !invite.pharmacy_id) return json({ error: "invite_invalid_or_expired" }, 410);
@@ -104,7 +119,7 @@ async function handle(request, env) {
   if (path === "/v1/invites" && request.method === "POST") {
     const actor = await manager(request, env);
     if (!actor) return json({ error: "manager_auth_required" }, 403);
-    const code = randomToken(6).toUpperCase(), timestamp = now(), expiry = timestamp + 600;
+    const code = randomToken(8).toUpperCase(), timestamp = now(), expiry = timestamp + 600;
     await env.DB.prepare("INSERT INTO invitations(code_hash,pharmacy_id,created_by,expires_at,created_at) VALUES(?,?,?,?,?)")
       .bind(await hash(code), actor.pharmacy_id, actor.id, expiry, timestamp).run();
     await audit(env, actor.pharmacy_id, actor, "invite_created", null, { expiresAt: expiry });
