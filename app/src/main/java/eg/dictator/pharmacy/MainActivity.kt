@@ -476,17 +476,25 @@ class PharmacyViewModel(
         }
     }
 
+    private val pendingSaleOperations = mutableMapOf<String, String>()
+
     fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<String>) -> Unit) {
         viewModelScope.launch {
             try {
+                val operationKey = lines.sortedBy { it.medicineId }
+                    .joinToString("|") { "${it.medicineId}:${it.quantity}" }
+                val operationId = pendingSaleOperations.getOrPut(operationKey) {
+                    java.util.UUID.randomUUID().toString()
+                }
                 val remoteLines = lines.map { line ->
                     val medicine = dao.medicineById(line.medicineId) ?: error("أحد الأصناف لم يعد موجودًا")
                     val remoteId = medicine.remoteId ?: error("هذا الصنف محلي وغير مرتبط بمخزون الصيدلية السحابي")
                     remoteId to line.quantity
                 }
                 val response = withContext(Dispatchers.IO) {
-                    PharmacyDataApi.createSale(session.token, java.util.UUID.randomUUID().toString(), remoteLines)
+                    PharmacyDataApi.createSale(session.token, operationId, remoteLines)
                 }
+                pendingSaleOperations.remove(operationKey)
                 refreshCloudCatalog()
                 onResult(Result.success(response.optString("invoiceNumber", response.optString("saleId"))))
             } catch (error: Exception) { onResult(Result.failure(error)) }
