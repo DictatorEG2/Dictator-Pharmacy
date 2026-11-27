@@ -66,6 +66,19 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
     val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val outOfStock = dao.outOfStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val recentSales = dao.recentSales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val debtSort = MutableStateFlow(2)
+    val activeDebts = debtSort.flatMapLatest { dao.activeDebts(it) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val paidDebts = dao.paidDebts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun setDebtSort(sort: Int) { debtSort.value = sort }
+    fun createDebt(name: String, lines: List<DebtLineRequest>, paid: Double, done: (Result<Long>) -> Unit) {
+        viewModelScope.launch { try { done(Result.success(dao.createDebt(name, lines, paid))) } catch (e: Exception) { done(Result.failure(e)) } }
+    }
+    fun payDebt(id: Long, amount: Double, done: (Result<Unit>) -> Unit) {
+        viewModelScope.launch { try { dao.recordDebtPayment(id, amount); done(Result.success(Unit)) } catch (e: Exception) { done(Result.failure(e)) } }
+    }
+    fun settleDebt(id: Long, done: (Result<Unit>) -> Unit) {
+        viewModelScope.launch { try { dao.markDebtPaid(id); done(Result.success(Unit)) } catch (e: Exception) { done(Result.failure(e)) } }
+    }
     private val reportFrom = MutableStateFlow(startOfDay())
     private val reportTo = MutableStateFlow(startOfDay() + 24L * 60 * 60 * 1000)
     val reportRevenue = combine(reportFrom, reportTo) { from, to -> from to to }
@@ -114,12 +127,15 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
     var showAdd by remember { mutableStateOf(false) }
     var showSale by remember { mutableStateOf(false) }
     var showReports by remember { mutableStateOf(false) }
+    var showDebts by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
     val recentSales by vm.recentSales.collectAsState()
+    val activeDebts by vm.activeDebts.collectAsState()
+    val paidDebts by vm.paidDebts.collectAsState()
     val reportRevenue by vm.reportRevenue.collectAsState()
     val reportCount by vm.reportCount.collectAsState()
     val reportTopSelling by vm.reportTopSelling.collectAsState()
@@ -158,6 +174,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
@@ -216,6 +234,15 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             }
         }
     }
+
+    if (showDebts) CustomerDebtsDialog(
+        medicines = allMedicines, debts = activeDebts, paidDebts = paidDebts,
+        onSortChanged = vm::setDebtSort,
+        onCreate = { name, lines, paid, done -> vm.createDebt(name, lines, paid, done) },
+        onPay = { id, amount, done -> vm.payDebt(id, amount, done) },
+        onSettle = { id, done -> vm.settleDebt(id, done) },
+        onDismiss = { showDebts = false }
+    )
 
     if (showReports) SalesReportDialog(
         sales = recentSales,
@@ -504,4 +531,118 @@ private fun SalesReportDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
     )
+}
+
+@Composable
+private fun CustomerDebtsDialog(
+    medicines: List<Medicine>, debts: List<CustomerDebtWithDetails>, paidDebts: List<CustomerDebtWithDetails>,
+    onSortChanged: (Int) -> Unit,
+    onCreate: (String, List<DebtLineRequest>, Double, (Result<Long>) -> Unit) -> Unit,
+    onPay: (Long, Double, (Result<Unit>) -> Unit) -> Unit,
+    onSettle: (Long, (Result<Unit>) -> Unit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var adding by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<CustomerDebtWithDetails?>(null) }
+    var sort by remember { mutableIntStateOf(2) }
+    var showPaid by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("مديونيات العملاء") }, text = {
+        Column(Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { adding = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("إضافة مديونية") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("الأحدث", "الأقدم", "الاسم", "الأعلى").forEachIndexed { i, label ->
+                    OutlinedButton(onClick = { sort = i; onSortChanged(i) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp)) { Text(label) }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (showPaid) "المديونيات المدفوعة" else "المديونيات الحالية", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton(onClick = { showPaid = !showPaid }) { Text(if (showPaid) "الحالية" else "المدفوعة") }
+            }
+            val rows = if (showPaid) paidDebts else debts
+            if (rows.isEmpty()) Text("لا توجد سجلات هنا.", color = Muted)
+            rows.forEach { entry ->
+                val d = entry.debt
+                val remaining = (d.totalAmount - d.paidAmount).coerceAtLeast(0.0)
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(d.customerName, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("الإجمالي: %.2f • المدفوع: %.2f ج.م".format(d.totalAmount, d.paidAmount), color = Muted)
+                        Text("المتبقي: %.2f ج.م".format(remaining), color = if (remaining > 0) Color(0xFFFFC36B) else Color(0xFF75C995), fontWeight = FontWeight.Bold)
+                        entry.items.forEach { item -> Text("• ${item.medicineName} — ${item.quantity} × ${item.unitPrice}", color = Muted) }
+                        if (remaining > 0) Row {
+                            TextButton(onClick = { selected = entry }) { Text("تسجيل دفعة") }
+                            TextButton(onClick = { onSettle(d.id) { result -> message = result.exceptionOrNull()?.message ?: "تم تسجيل التسوية بالكامل" } }) { Text("تم الدفع بالكامل") }
+                        }
+                    }
+                }
+            }
+            message?.let { Text(it, color = Color(0xFF75C995)) }
+        }
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } })
+    if (adding) AddCustomerDebtDialog(medicines, onDismiss = { adding = false }, onCreate = { name, lines, paid ->
+        onCreate(name, lines, paid) { result ->
+            result.onSuccess { adding = false; message = "تم تسجيل المديونية #${it}" }
+                .onFailure { message = it.message ?: "تعذر حفظ المديونية" }
+        }
+    })
+    selected?.let { entry ->
+        DebtPaymentDialog(entry.debt.customerName, entry.debt.totalAmount - entry.debt.paidAmount,
+            onDismiss = { selected = null }, onPay = { amount ->
+                onPay(entry.debt.id, amount) { result ->
+                    result.onSuccess { selected = null; message = "تم تسجيل الدفعة" }
+                        .onFailure { message = it.message ?: "تعذر تسجيل الدفعة" }
+                }
+            })
+    }
+}
+
+@Composable
+private fun AddCustomerDebtDialog(
+    medicines: List<Medicine>, onDismiss: () -> Unit,
+    onCreate: (String, List<DebtLineRequest>, Double) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    var firstPayment by remember { mutableStateOf("0") }
+    val cart = remember { mutableStateMapOf<Long, Int>() }
+    var error by remember { mutableStateOf<String?>(null) }
+    val selected = medicines.filter { (cart[it.id] ?: 0) > 0 }
+    val total = selected.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("إضافة مديونية") }, text = {
+        Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم العميل") }, singleLine = true)
+            OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
+            medicines.filter { it.quantity > 0 && (query.isBlank() || it.name.contains(query, true)) }.take(60).forEach { m ->
+                Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(8.dp)).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { Text(m.name, color = Color.White); Text("%.2f ج.م".format(m.sellingPrice), color = Muted) }
+                    TextButton(onClick = { val n = cart[m.id] ?: 0; if (n < m.quantity) cart[m.id] = n + 1 }) { Text("+") }
+                    Text((cart[m.id] ?: 0).toString())
+                    TextButton(onClick = { val n = cart[m.id] ?: 0; if (n <= 1) cart.remove(m.id) else cart[m.id] = n - 1 }) { Text("−") }
+                }
+            }
+            Text("الإجمالي: %.2f ج.م".format(total), fontWeight = FontWeight.Bold)
+            OutlinedTextField(firstPayment, { firstPayment = it }, modifier = Modifier.fillMaxWidth(), label = { Text("دفعة أولى (اختياري)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+            error?.let { Text(it, color = Color(0xFFFF8888)) }
+        }
+    }, confirmButton = {
+        TextButton(enabled = name.isNotBlank() && cart.isNotEmpty(), onClick = {
+            val paid = firstPayment.toDoubleOrNull()
+            if (paid == null || paid < 0 || paid > total) error = "راجع قيمة الدفعة الأولى"
+            else onCreate(name, cart.map { DebtLineRequest(it.key, it.value) }, paid)
+        }) { Text("حفظ المديونية") }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+}
+
+@Composable
+private fun DebtPaymentDialog(customer: String, remaining: Double, onDismiss: () -> Unit, onPay: (Double) -> Unit) {
+    var amount by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("دفعة من ${customer}") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("المتبقي: %.2f ج.م".format(remaining))
+            OutlinedTextField(amount, { amount = it }, label = { Text("المبلغ المدفوع") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        }
+    }, confirmButton = {
+        TextButton(onClick = { val v = amount.toDoubleOrNull(); if (v != null && v > 0 && v <= remaining) onPay(v) }) { Text("تسجيل الدفعة") }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
 }
