@@ -535,7 +535,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 Text("PHARMACY MANAGEMENT SYSTEM", color = Muted, style = MaterialTheme.typography.labelSmall)
                 Spacer(Modifier.height(8.dp))
                 Text("إدارة الصيدلية", color = Color.White)
-                Text("تنبيه: بيانات هذا الجهاز محلية حاليًا ولا تتم مزامنتها مع الأجهزة الأخرى بعد.", color = Color(0xFFFFC36B), style = MaterialTheme.typography.bodySmall)
+                Text("تتم مزامنة الأدوية والمخزون والمبيعات والمديونيات مع الأجهزة المعتمدة عند توفر الإنترنت.", color = Color(0xFF75C995), style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButton = {
