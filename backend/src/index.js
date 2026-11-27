@@ -166,6 +166,62 @@ async function medicineApi(request, env, device, url, path) {
   return json({ error: "method_not_allowed" }, 405);
 }
 
+
+async function inventoryApi(request, env, device, url, path) {
+  if (path === "/v1/inventory/batches" && request.method === "GET") {
+    const medicineId = validOptionalText(url.searchParams.get("medicineId"), 64);
+    const pageRaw = Number(url.searchParams.get("page") || 1);
+    const page = Number.isSafeInteger(pageRaw) && pageRaw > 0 ? Math.min(pageRaw, 100000) : 1;
+    const where = ["b.pharmacy_id=?"];
+    const values = [device.pharmacy_id];
+    if (medicineId) { where.push("b.medicine_id=?"); values.push(medicineId); }
+    const result = await env.DB.prepare(`SELECT b.id,b.medicine_id,m.name AS medicine_name,b.batch_number,b.expiry_date,b.quantity,b.purchase_price_minor,b.created_at,b.updated_at
+      FROM inventory_batches b JOIN medicines m ON m.id=b.medicine_id AND m.pharmacy_id=b.pharmacy_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY CASE WHEN b.expiry_date IS NULL THEN 1 ELSE 0 END,b.expiry_date ASC,b.id ASC
+      LIMIT 21 OFFSET ?`).bind(...values, (page - 1) * 20).all();
+    const rows = result.results || [];
+    return json({ batches: rows.slice(0, 20), page, pageSize: 20, hasMore: rows.length > 20, nextPage: rows.length > 20 ? page + 1 : null });
+  }
+
+  if (path === "/v1/inventory/batches" && request.method === "POST") {
+    const input = await body(request);
+    const medicineId = String(input.medicineId || "").trim();
+    const quantity = input.quantity;
+    const purchasePrice = input.purchasePriceMinor ?? 0;
+    const expiryDate = validOptionalText(input.expiryDate, 10);
+    const batchNumber = validOptionalText(input.batchNumber, 80);
+    if (!/^[a-f0-9-]{36}$/i.test(medicineId) ||
+        !Number.isSafeInteger(quantity) || quantity <= 0 ||
+        !Number.isSafeInteger(purchasePrice) || purchasePrice < 0)
+      return json({ error: "invalid_batch_fields" }, 400);
+    if (expiryDate && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(expiryDate) || !Number.isFinite(Date.parse(expiryDate)) || new Date(expiryDate).toISOString().slice(0,10) !== expiryDate))
+      return json({ error: "invalid_expiry_date" }, 400);
+
+    const id = crypto.randomUUID(), movementId = crypto.randomUUID(), timestamp = now();
+    const results = await env.DB.batch([
+      env.DB.prepare(`INSERT INTO inventory_batches
+        (id,pharmacy_id,medicine_id,batch_number,expiry_date,quantity,purchase_price_minor,created_at,updated_at)
+        SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(
+          SELECT 1 FROM medicines WHERE id=? AND pharmacy_id=? AND is_active=1
+        )`)
+        .bind(id, device.pharmacy_id, medicineId, batchNumber, expiryDate, quantity, purchasePrice, timestamp, timestamp, medicineId, device.pharmacy_id),
+      env.DB.prepare(`INSERT INTO stock_movements
+        (id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at)
+        SELECT ?,?,?,?,?, 'purchase', ?, 'inventory_batch', ?, ?
+        WHERE changes()=1 AND EXISTS(
+          SELECT 1 FROM inventory_batches WHERE id=? AND pharmacy_id=? AND medicine_id=?
+        )`)
+        .bind(movementId, device.pharmacy_id, medicineId, id, device.id, quantity, id, timestamp, id, device.pharmacy_id, medicineId)
+    ]);
+    if (!results?.[0]?.meta?.changes || !results?.[1]?.meta?.changes)
+      return json({ error: "active_medicine_not_found_or_stock_insert_failed" }, 404);
+    await audit(env, device.pharmacy_id, device, "inventory_batch_created", id, { medicineId, quantity, expiryDate });
+    return json({ id, medicineId, quantity, expiryDate, created: true }, 201);
+  }
+  return null;
+}
+
 async function handle(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
   const url = new URL(request.url), path = url.pathname;
@@ -254,6 +310,8 @@ async function handle(request, env) {
     return json({ deviceId: device.id, deviceName: device.name, role: device.role, status: device.status, pharmacyId: device.pharmacy_id });
   const medicineResponse = await medicineApi(request, env, device, url, path);
   if (medicineResponse) return medicineResponse;
+  const inventoryResponse = await inventoryApi(request, env, device, url, path);
+  if (inventoryResponse) return inventoryResponse;
   return json({ error: "not_found" }, 404);
 }
 export default {
