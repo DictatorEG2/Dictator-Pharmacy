@@ -75,7 +75,8 @@ data class CustomerDebt(
     val totalAmount: Double,
     val paidAmount: Double = 0.0,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val remoteSaleId: String? = null
 )
 
 @Entity(
