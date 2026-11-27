@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class],
-    version = 2,
+    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class],
+    version = 3,
     exportSchema = true
 )
 abstract class PharmacyDatabase : RoomDatabase() {
@@ -26,10 +26,24 @@ abstract class PharmacyDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS customer_debts (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, customerName TEXT NOT NULL, totalAmount REAL NOT NULL, paidAmount REAL NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_customer_debts_createdAt ON customer_debts(createdAt)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_customer_debts_customerName ON customer_debts(customerName)")
+                database.execSQL("CREATE TABLE IF NOT EXISTS debt_items (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, debtId INTEGER NOT NULL, medicineId INTEGER, medicineName TEXT NOT NULL, unitPrice REAL NOT NULL, quantity INTEGER NOT NULL, lineTotal REAL NOT NULL, FOREIGN KEY(debtId) REFERENCES customer_debts(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_debt_items_debtId ON debt_items(debtId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_debt_items_medicineId ON debt_items(medicineId)")
+                database.execSQL("CREATE TABLE IF NOT EXISTS debt_payments (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, debtId INTEGER NOT NULL, amount REAL NOT NULL, note TEXT, createdAt INTEGER NOT NULL, FOREIGN KEY(debtId) REFERENCES customer_debts(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_debt_payments_debtId ON debt_payments(debtId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_debt_payments_createdAt ON debt_payments(createdAt)")
+            }
+        }
+
         @Volatile private var instance: PharmacyDatabase? = null
         fun get(context: Context): PharmacyDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, PharmacyDatabase::class.java, "dictator_pharmacy.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }
