@@ -97,9 +97,10 @@ async function medicineApi(request, env, device, url, path) {
     const values = [device.pharmacy_id];
     if (q) { where.push("normalized_name LIKE ?"); values.push("%" + q + "%"); }
     if (category) { where.push("category=?"); values.push(category); }
-    const result = await env.DB.prepare(`SELECT id,name,normalized_name,category,barcode,image_url,unit,sale_price_minor,low_stock_threshold,created_at,updated_at
-      FROM medicines WHERE ${where.join(" AND ")}
-      ORDER BY normalized_name ASC,id ASC LIMIT 21 OFFSET ?`)
+    const result = await env.DB.prepare(`SELECT m.id,m.name,m.normalized_name,m.category,m.barcode,m.image_url,m.unit,m.sale_price_minor,m.low_stock_threshold,m.created_at,m.updated_at,
+      COALESCE((SELECT SUM(b.quantity) FROM inventory_batches b WHERE b.pharmacy_id=m.pharmacy_id AND b.medicine_id=m.id AND b.quantity>0 AND (b.expiry_date IS NULL OR b.expiry_date>=date('now'))),0) AS stock_quantity
+      FROM medicines m WHERE ${where.join(" AND ").replaceAll("pharmacy_id","m.pharmacy_id").replaceAll("is_active","m.is_active").replaceAll("normalized_name","m.normalized_name").replaceAll("category","m.category")}
+      ORDER BY m.normalized_name ASC,m.id ASC LIMIT 21 OFFSET ?`)
       .bind(...values, (page - 1) * 20).all();
     const rows = result.results || [];
     return json({ medicines: rows.slice(0, 20), page, pageSize: 20, hasMore: rows.length > 20, nextPage: rows.length > 20 ? page + 1 : null });
