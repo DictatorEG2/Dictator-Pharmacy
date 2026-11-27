@@ -263,7 +263,7 @@ class PharmacyViewModel(
                         )
                     )
                 }
-                if (ids.isNotEmpty()) dao.removeMissingRemoteMedicines(ids)
+                if (ids.isNotEmpty()) dao.removeMissingRemoteMedicines(ids) else dao.clearRemoteMedicines()
             } catch (_: Exception) {
                 // Keep the last locally cached catalog when temporarily offline.
             }
