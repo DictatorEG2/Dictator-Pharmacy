@@ -30,6 +30,19 @@ abstract class MedicineDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertSale(sale: Sale): Long
 
+    @Transaction
+    @Query("SELECT * FROM sales ORDER BY createdAt DESC LIMIT 100")
+    abstract fun recentSales(): Flow<List<SaleWithItems>>
+
+    @Query("SELECT medicineId, medicineName, SUM(quantity) AS soldQuantity, SUM(lineTotal) AS revenue FROM sale_items INNER JOIN sales ON sales.id = sale_items.saleId WHERE sales.createdAt >= :fromTime AND sales.createdAt < :toTime GROUP BY medicineId, medicineName ORDER BY soldQuantity DESC, revenue DESC LIMIT 10")
+    abstract fun topSelling(fromTime: Long, toTime: Long): Flow<List<TopSellingMedicine>>
+
+    @Query("SELECT COALESCE(SUM(total), 0) FROM sales WHERE createdAt >= :fromTime AND createdAt < :toTime")
+    abstract fun revenueBetween(fromTime: Long, toTime: Long): Flow<Double>
+
+    @Query("SELECT COUNT(*) FROM sales WHERE createdAt >= :fromTime AND createdAt < :toTime")
+    abstract fun salesCountBetween(fromTime: Long, toTime: Long): Flow<Int>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertSaleItems(items: List<SaleItem>)
 
