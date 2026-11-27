@@ -51,6 +51,7 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
     val searchText = MutableStateFlow("")
     val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val outOfStock = dao.outOfStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -62,6 +63,13 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
 
     fun adjustStock(id: Long, delta: Int, reason: String) {
         viewModelScope.launch { dao.adjustStock(id, delta, reason) }
+    }
+
+    fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<Long>) -> Unit) {
+        viewModelScope.launch {
+            try { onResult(Result.success(dao.completeSale(lines))) }
+            catch (error: Exception) { onResult(Result.failure(error)) }
+        }
     }
 
     companion object {
@@ -76,8 +84,10 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
 private fun PharmacyScreen(vm: PharmacyViewModel) {
     var search by remember { mutableStateOf("") }
     var showAdd by remember { mutableStateOf(false) }
+    var showSale by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
     val medicines by vm.medicines.collectAsState()
+    val allMedicines by vm.allMedicines.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -111,6 +121,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
                 label = { Text("ابحث باسم الدواء أو جزء منه") },
                 singleLine = true
             )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
@@ -169,6 +181,12 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             }
         }
     }
+
+    if (showSale) SaleDialog(
+        medicines = allMedicines,
+        onDismiss = { showSale = false },
+        onComplete = { lines, callback -> vm.completeSale(lines, callback) }
+    )
 
     if (showAdd) AddMedicineDialog(
         onDismiss = { showAdd = false },
@@ -254,5 +272,85 @@ private fun AdjustStockDialog(medicine: Medicine, onDismiss: () -> Unit, onApply
             }) { Text("تأكيد") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+    )
+}
+
+
+@Composable
+private fun SaleDialog(
+    medicines: List<Medicine>,
+    onDismiss: () -> Unit,
+    onComplete: (List<SaleLineRequest>, (Result<Long>) -> Unit) -> Unit
+) {
+    val cart = remember { mutableStateMapOf<Long, Int>() }
+    var query by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val filtered = medicines.filter {
+        it.quantity > 0 && (query.isBlank() || it.name.contains(query, ignoreCase = true) || it.category.contains(query, ignoreCase = true))
+    }
+    val cartMedicines = medicines.filter { (cart[it.id] ?: 0) > 0 }
+    val total = cartMedicines.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("عملية بيع جديدة") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
+                Text("الأصناف المتاحة", fontWeight = FontWeight.Bold)
+                filtered.take(80).forEach { medicine ->
+                    Row(
+                        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp)).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(medicine.name, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("${medicine.sellingPrice} ج.م • المتاح ${medicine.quantity}", color = Muted)
+                        }
+                        TextButton(onClick = {
+                            val current = cart[medicine.id] ?: 0
+                            if (current < medicine.quantity) cart[medicine.id] = current + 1
+                        }) { Text("+") }
+                        Text((cart[medicine.id] ?: 0).toString(), color = Color.White)
+                        TextButton(onClick = {
+                            val current = cart[medicine.id] ?: 0
+                            if (current <= 1) cart.remove(medicine.id) else cart[medicine.id] = current - 1
+                        }) { Text("−") }
+                    }
+                }
+                HorizontalDivider()
+                Text("السلة", fontWeight = FontWeight.Bold)
+                if (cartMedicines.isEmpty()) Text("لم تضف أي صنف بعد", color = Muted)
+                cartMedicines.forEach { medicine ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(medicine.name, modifier = Modifier.weight(1f))
+                        Text("${cart[medicine.id]} × ${medicine.sellingPrice} ج.م")
+                    }
+                }
+                Text("الإجمالي: %.2f ج.م".format(total), color = Color.White, fontWeight = FontWeight.Bold)
+                message?.let { Text(it, color = Color(0xFFFF8888)) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = cart.isNotEmpty() && !saving, onClick = {
+                saving = true
+                val lines = cart.map { SaleLineRequest(it.key, it.value) }
+                onComplete(lines) { result ->
+                    saving = false
+                    result.onSuccess { saleId ->
+                        message = "تم تسجيل الفاتورة #$saleId"
+                        cart.clear()
+                        onDismiss()
+                    }.onFailure { error ->
+                        message = error.message ?: "تعذر إتمام عملية البيع"
+                    }
+                }
+            }) { Text(if (saving) "جارٍ الحفظ..." else "تأكيد البيع") }
+        },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } }
     )
 }
