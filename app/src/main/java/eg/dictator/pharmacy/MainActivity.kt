@@ -238,7 +238,10 @@ class PharmacyViewModel(
     private val dao: MedicineDao,
     private val session: SecureSessionStore.Session
 ) : ViewModel() {
-    init { refreshCloudCatalog() }
+    init {
+        refreshCloudCatalog()
+        setReportRange(startOfDay(), startOfDay() + 24L * 60 * 60 * 1000)
+    }
 
     private fun refreshCloudCatalog() {
         viewModelScope.launch {
@@ -380,21 +383,28 @@ class PharmacyViewModel(
             } catch (e: Exception) { done(Result.failure(e)) }
         }
     }
-    private val reportFrom = MutableStateFlow(startOfDay())
-    private val reportTo = MutableStateFlow(startOfDay() + 24L * 60 * 60 * 1000)
-    val reportRevenue = combine(reportFrom, reportTo) { from, to -> from to to }
-        .flatMapLatest { (from, to) -> dao.revenueBetween(from, to) }
+    private val remoteReport = MutableStateFlow(
+        eg.dictator.pharmacy.network.RemoteReport(0, 0, 0, 0)
+    )
+    val reportRevenue = remoteReport.map { it.revenueMinor / 100.0 }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
-    val reportCount = combine(reportFrom, reportTo) { from, to -> from to to }
-        .flatMapLatest { (from, to) -> dao.salesCountBetween(from, to) }
+    val reportCount = remoteReport.map { it.saleCount }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-    val reportTopSelling = combine(reportFrom, reportTo) { from, to -> from to to }
-        .flatMapLatest { (from, to) -> dao.topSelling(from, to) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val reportTopSelling = remoteReport.map { report ->
+        report.topSelling.mapIndexed { index, item ->
+            TopSellingMedicine(index.toLong(), item.medicineName, item.soldQuantity, item.revenueMinor / 100.0)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun setReportRange(from: Long, to: Long) {
-        reportFrom.value = from
-        reportTo.value = to
+        if (session.role != "manager") return
+        viewModelScope.launch {
+            try {
+                remoteReport.value = withContext(Dispatchers.IO) {
+                    PharmacyDataApi.getReport(session.token, from / 1000L, to / 1000L)
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     fun addMedicine(name: String, category: String, price: Double, quantity: Int) {
