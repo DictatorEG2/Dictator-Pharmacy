@@ -15,7 +15,8 @@ data class Medicine(
     val minimumQuantity: Int = 3,
     val barcode: String? = null,
     val imageUri: String? = null,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val remoteId: String? = null
 )
 
 @Entity(tableName = "stock_movements", indices = [Index("medicineId"), Index("createdAt")])
