@@ -1,6 +1,10 @@
 -- Pharmacy business data: tenant-scoped catalog, stock, sales and customer ledger.
 PRAGMA foreign_keys = ON;
 
+-- Composite parent key lets SQLite enforce device ownership in tenant-scoped foreign keys.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_id_pharmacy
+  ON devices(id, pharmacy_id);
+
 CREATE TABLE IF NOT EXISTS medicines (
   id TEXT PRIMARY KEY,
   pharmacy_id TEXT NOT NULL REFERENCES pharmacies(id),
