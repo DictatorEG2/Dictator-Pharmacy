@@ -50,11 +50,11 @@ async function handle(request, env) {
     const id = crypto.randomUUID(), token = randomToken();
     const tokenHash = await hash(token), timestamp = now();
     const result = await env.DB.batch([
-      env.DB.prepare("INSERT INTO devices(id,name,role,status,token_hash,created_at,approved_at,last_seen_at) VALUES(?,?,'manager','active',?,?,?,?)")
-        .bind(id, name, tokenHash, timestamp, timestamp, timestamp),
-      env.DB.prepare("UPDATE pharmacy_state SET manager_device_id=? WHERE id=1 AND manager_device_id IS NULL").bind(id)
+      env.DB.prepare("UPDATE pharmacy_state SET manager_device_id=? WHERE id=1 AND manager_device_id IS NULL").bind(id),
+      env.DB.prepare("INSERT INTO devices(id,name,role,status,token_hash,created_at,approved_at,last_seen_at) SELECT ?,?,'manager','active',?,?,?,? WHERE EXISTS (SELECT 1 FROM pharmacy_state WHERE id=1 AND manager_device_id=?)")
+        .bind(id, name, tokenHash, timestamp, timestamp, timestamp, id)
     ]);
-    if (!result?.length) return json({ error: "manager_setup_failed" }, 500);
+    if (!result?.[1]?.meta?.changes) return json({ error: "manager_already_configured" }, 409);
     await audit(env, { id }, "manager_initialized", id);
     return json({ deviceId: id, token, role: "manager" }, 201);
   }
@@ -67,11 +67,11 @@ async function handle(request, env) {
     const invite = await env.DB.prepare("SELECT code_hash,created_by,expires_at,used_at FROM invitations WHERE code_hash=?").bind(codeHash).first();
     if (!invite || invite.used_at || invite.expires_at < timestamp) return json({ error: "invite_invalid_or_expired" }, 410);
     const id = crypto.randomUUID();
-    const result = await env.DB.batch([
-      env.DB.prepare("UPDATE invitations SET used_at=? WHERE code_hash=? AND used_at IS NULL AND expires_at>=?").bind(timestamp, codeHash, timestamp),
-      env.DB.prepare("INSERT INTO devices(id,name,role,status,created_at) VALUES(?,?,'staff','pending',?)").bind(id, name, timestamp)
-    ]);
-    if (!result?.length) return json({ error: "enrollment_failed" }, 409);
+    const claimed = await env.DB.prepare("UPDATE invitations SET used_at=? WHERE code_hash=? AND used_at IS NULL AND expires_at>=?")
+      .bind(timestamp, codeHash, timestamp).run();
+    if (!claimed.meta?.changes) return json({ error: "invite_invalid_or_expired" }, 410);
+    await env.DB.prepare("INSERT INTO devices(id,name,role,status,created_at) VALUES(?,?,'staff','pending',?)")
+      .bind(id, name, timestamp).run();
     await audit(env, null, "device_enrollment_requested", id);
     return json({ deviceId: id, status: "pending", message: "Awaiting manager approval" }, 202);
   }
