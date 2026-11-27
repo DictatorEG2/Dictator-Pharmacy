@@ -222,6 +222,139 @@ async function inventoryApi(request, env, device, url, path) {
   return null;
 }
 
+
+async function salesApi(request, env, device, path) {
+  if (path !== "/v1/sales" || request.method !== "POST") return null;
+  const input = await body(request);
+  const operationId = String(input.operationId || "").trim();
+  if (!/^[A-Za-z0-9_-]{16,80}$/.test(operationId)) return json({ error: "valid_operation_id_required" }, 400);
+  if (!Array.isArray(input.items) || !input.items.length || input.items.length > 20)
+    return json({ error: "sale_requires_1_to_20_items" }, 400);
+
+  const merged = new Map();
+  for (const item of input.items) {
+    const id = String(item?.medicineId || "").trim(), qty = item?.quantity;
+    if (!/^[a-f0-9-]{36}$/i.test(id) || !Number.isSafeInteger(qty) || qty <= 0)
+      return json({ error: "invalid_sale_item" }, 400);
+    merged.set(id, (merged.get(id) || 0) + qty);
+    if (!Number.isSafeInteger(merged.get(id))) return json({ error: "sale_quantity_too_large" }, 400);
+  }
+  const lines = [...merged].map(([medicineId, quantity]) => ({ medicineId, quantity }))
+    .sort((a,b) => a.medicineId.localeCompare(b.medicineId));
+  const customerId = validOptionalText(input.customerId, 64);
+  if (customerId && !/^[a-f0-9-]{36}$/i.test(customerId)) return json({ error: "invalid_customer_id" }, 400);
+  const paid = input.paymentAmountMinor ?? 0, method = String(input.paymentMethod || "cash");
+  if (!Number.isSafeInteger(paid) || paid < 0 || !["cash","card","transfer","other"].includes(method))
+    return json({ error: "invalid_payment" }, 400);
+  const payloadHash = await hash(JSON.stringify({ customerId, items: lines, paymentAmountMinor: paid, paymentMethod: method }));
+
+  const findOperation = () => env.DB.prepare("SELECT payload_hash,result_json FROM sync_operations WHERE pharmacy_id=? AND operation_id=?")
+    .bind(device.pharmacy_id, operationId).first();
+  const prior = await findOperation();
+  if (prior) {
+    if (prior.payload_hash !== payloadHash) return json({ error: "operation_id_payload_mismatch" }, 409);
+    return json({ ...JSON.parse(prior.result_json), replayed: true });
+  }
+
+  const ids = lines.map(x => x.medicineId), marks = ids.map(() => "?").join(",");
+  const medResult = await env.DB.prepare("SELECT id,name,sale_price_minor FROM medicines WHERE pharmacy_id=? AND is_active=1 AND id IN (" + marks + ")")
+    .bind(device.pharmacy_id, ...ids).all();
+  const meds = new Map((medResult.results || []).map(x => [x.id,x]));
+  if (meds.size !== ids.length) return json({ error: "medicine_not_found_or_inactive" }, 404);
+  let total = 0;
+  for (const line of lines) {
+    const med = meds.get(line.medicineId), amount = med.sale_price_minor * line.quantity;
+    if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(total + amount))
+      return json({ error: "sale_total_out_of_range" }, 400);
+    Object.assign(line, { name: med.name, unitPrice: med.sale_price_minor, lineTotal: amount });
+    total += amount;
+  }
+  if (paid > total) return json({ error: "payment_exceeds_sale_total" }, 400);
+  if (customerId) {
+    const customer = await env.DB.prepare("SELECT id FROM customers WHERE id=? AND pharmacy_id=?")
+      .bind(customerId,device.pharmacy_id).first();
+    if (!customer) return json({ error: "customer_not_found" }, 404);
+  }
+
+  const today = new Date().toISOString().slice(0,10);
+  const stock = await env.DB.prepare("SELECT id,medicine_id,expiry_date,quantity FROM inventory_batches WHERE pharmacy_id=? AND medicine_id IN (" +
+    marks + ") AND quantity>0 AND (expiry_date IS NULL OR expiry_date>=?) ORDER BY medicine_id,CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END,expiry_date,created_at,id")
+    .bind(device.pharmacy_id,...ids,today).all();
+  const byMedicine = new Map(ids.map(id => [id,[]]));
+  for (const batch of stock.results || []) byMedicine.get(batch.medicine_id).push(batch);
+  const allocations = [];
+  for (const line of lines) {
+    let left = line.quantity;
+    for (const batch of byMedicine.get(line.medicineId)) {
+      if (!left) break;
+      const take = Math.min(left,batch.quantity);
+      if (take) allocations.push({ ...batch,take,line });
+      left -= take;
+    }
+    if (left) return json({ error:"insufficient_stock",medicineId:line.medicineId,
+      requested:line.quantity,available:line.quantity-left },409);
+  }
+  if (!allocations.length || allocations.length > 40) return json({ error:"sale_allocation_limit_exceeded" },400);
+
+  const saleId = crypto.randomUUID(), stamp = now(), expected = allocations.length;
+  const resultBody = { saleId,invoiceNumber:saleId,totalMinor:total,paidMinor:paid,dueMinor:total-paid,
+    itemCount:lines.length,createdAt:stamp };
+  const allocationIds = allocations.map(x => x.id), batchMarks = allocationIds.map(() => "?").join(",");
+  const caseSql = "CASE id " + allocations.map(() => "WHEN ? THEN ?").join(" ") + " ELSE 0 END";
+  const caseArgs = allocations.flatMap(x => [x.id,x.take]);
+  const statements = [
+    env.DB.prepare("UPDATE inventory_batches SET quantity=quantity-(" + caseSql + "),updated_at=? " +
+      "WHERE pharmacy_id=? AND id IN (" + batchMarks + ") AND quantity>=(" + caseSql + ") " +
+      "AND (SELECT COUNT(*) FROM inventory_batches WHERE pharmacy_id=? AND id IN (" + batchMarks +
+      ") AND quantity>=(" + caseSql + "))=?")
+      .bind(...caseArgs,stamp,device.pharmacy_id,...allocationIds,...caseArgs,device.pharmacy_id,...allocationIds,...caseArgs,expected),
+    env.DB.prepare("INSERT INTO sales(id,pharmacy_id,device_id,customer_id,invoice_number,status,total_minor,created_at,updated_at) " +
+      "SELECT ?,?,?,?,?, 'completed',?,?,? WHERE changes()=?")
+      .bind(saleId,device.pharmacy_id,device.id,customerId,saleId,total,stamp,stamp,expected)
+  ];
+
+  for (const a of allocations) {
+    statements.push(env.DB.prepare("INSERT INTO sale_items(id,pharmacy_id,sale_id,medicine_id,batch_id,medicine_name_snapshot,quantity,unit_price_minor,line_total_minor,created_at) " +
+      "SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
+      .bind(crypto.randomUUID(),device.pharmacy_id,saleId,a.line.medicineId,a.id,a.line.name,a.take,
+        a.line.unitPrice,a.take*a.line.unitPrice,stamp,saleId,device.pharmacy_id));
+    statements.push(env.DB.prepare("INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) " +
+      "SELECT ?,?,?,?,?, 'sale', ?, 'sale', ?, ? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
+      .bind(crypto.randomUUID(),device.pharmacy_id,a.line.medicineId,a.id,device.id,-a.take,saleId,stamp,saleId,device.pharmacy_id));
+  }
+  if (paid > 0) statements.push(env.DB.prepare("INSERT INTO sale_payments(id,pharmacy_id,sale_id,customer_id,device_id,amount_minor,payment_method,created_at) " +
+    "SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
+    .bind(crypto.randomUUID(),device.pharmacy_id,saleId,customerId,device.id,paid,method,stamp,saleId,device.pharmacy_id));
+
+  statements.push(env.DB.prepare("INSERT INTO sync_operations(pharmacy_id,operation_id,payload_hash,result_json,created_at) " +
+    "SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
+    .bind(device.pharmacy_id,operationId,payloadHash,JSON.stringify(resultBody),stamp,saleId,device.pharmacy_id));
+  statements.push(env.DB.prepare("INSERT INTO audit_log(pharmacy_id,actor_device_id,action,target_id,created_at,details_json) " +
+    "SELECT ?,?,'sale_created',?,?,? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
+    .bind(device.pharmacy_id,device.id,saleId,stamp,JSON.stringify({totalMinor:total,paidMinor:paid,itemCount:lines.length}),saleId,device.pharmacy_id));
+
+  try {
+    const results = await env.DB.batch(statements);
+    if ((results?.[0]?.meta?.changes || 0) !== expected) {
+      const raced = await findOperation();
+      if (raced) {
+        if (raced.payload_hash !== payloadHash) return json({error:"operation_id_payload_mismatch"},409);
+        return json({...JSON.parse(raced.result_json),replayed:true});
+      }
+      return json({error:"insufficient_stock_or_stock_changed_retry"},409);
+    }
+    if (!results?.[1]?.meta?.changes) throw new Error("sale_insert_failed");
+    return json(resultBody,201);
+  } catch (error) {
+    const raced = await findOperation();
+    if (raced) {
+      if (raced.payload_hash !== payloadHash) return json({error:"operation_id_payload_mismatch"},409);
+      return json({...JSON.parse(raced.result_json),replayed:true});
+    }
+    throw error;
+  }
+}
+
 async function handle(request, env) {
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders() });
   const url = new URL(request.url), path = url.pathname;
@@ -308,6 +441,8 @@ async function handle(request, env) {
   if (!device) return json({ error: "authentication_required" }, 401);
   if (path === "/v1/me" && request.method === "GET")
     return json({ deviceId: device.id, deviceName: device.name, role: device.role, status: device.status, pharmacyId: device.pharmacy_id });
+  const saleResponse = await salesApi(request, env, device, path);
+  if (saleResponse) return saleResponse;
   const medicineResponse = await medicineApi(request, env, device, url, path);
   if (medicineResponse) return medicineResponse;
   const inventoryResponse = await inventoryApi(request, env, device, url, path);
