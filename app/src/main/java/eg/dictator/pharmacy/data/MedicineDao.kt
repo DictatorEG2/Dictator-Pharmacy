@@ -66,6 +66,21 @@ abstract class MedicineDao {
         require(total > 0.0 && initialPayment <= total) { "الدفعة أكبر من إجمالي المديونية" }
         val now = System.currentTimeMillis()
         val debtId = insertDebt(CustomerDebt(customerName = customerName.trim(), totalAmount = total, paidAmount = initialPayment, createdAt = now, updatedAt = now))
+        // A purchase recorded as debt is still a sale: deduct stock in the same
+        // Room transaction so the same units cannot be sold a second time.
+        details.forEach { (medicine, quantity, _) ->
+            check(updateQuantity(medicine.id, -quantity, now) == 1) {
+                "تعذر خصم مخزون الصنف: ${medicine.name}"
+            }
+            insertMovement(
+                StockMovement(
+                    medicineId = medicine.id,
+                    delta = -quantity,
+                    reason = "بيع آجل #$debtId",
+                    createdAt = now
+                )
+            )
+        }
         insertDebtItems(details.map { (medicine, quantity, price) ->
             DebtItem(debtId = debtId, medicineId = medicine.id, medicineName = medicine.name, unitPrice = price, quantity = quantity, lineTotal = price * quantity)
         })
