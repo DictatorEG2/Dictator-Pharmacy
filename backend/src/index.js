@@ -195,7 +195,7 @@ async function inventoryApi(request, env, device, url, path) {
         !Number.isSafeInteger(quantity) || quantity <= 0 ||
         !Number.isSafeInteger(purchasePrice) || purchasePrice < 0)
       return json({ error: "invalid_batch_fields" }, 400);
-    if (expiryDate && (!/^\\d{4}-\\d{2}-\\d{2}$/.test(expiryDate) || !Number.isFinite(Date.parse(expiryDate)) || new Date(expiryDate).toISOString().slice(0,10) !== expiryDate))
+    if (expiryDate && (!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate) || !Number.isFinite(Date.parse(expiryDate)) || new Date(expiryDate).toISOString().slice(0,10) !== expiryDate))
       return json({ error: "invalid_expiry_date" }, 400);
 
     const id = crypto.randomUUID(), movementId = crypto.randomUUID(), timestamp = now();
@@ -209,7 +209,7 @@ async function inventoryApi(request, env, device, url, path) {
       env.DB.prepare(`INSERT INTO stock_movements
         (id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at)
         SELECT ?,?,?,?,?, 'purchase', ?, 'inventory_batch', ?, ?
-        WHERE changes()=1 AND EXISTS(
+        WHERE EXISTS(
           SELECT 1 FROM inventory_batches WHERE id=? AND pharmacy_id=? AND medicine_id=?
         )`)
         .bind(movementId, device.pharmacy_id, medicineId, id, device.id, quantity, id, timestamp, id, device.pharmacy_id, medicineId)
