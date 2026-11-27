@@ -5,5 +5,5 @@ compatibility_date = "2026-11-27"
 [[d1_databases]]
 binding = "DB"
 database_name = "dictator-pharmacy"
-database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+database_id = "dce2ddf8-daa2-4cfb-90a5-b2db7bd6de7a"
 migrations_dir = "migrations"
