@@ -63,7 +63,7 @@ abstract class MedicineDao {
     @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE paidAmount < totalAmount ORDER BY CASE WHEN :sort = 0 THEN customerName END COLLATE NOCASE ASC, CASE WHEN :sort = 1 THEN (totalAmount - paidAmount) END DESC, CASE WHEN :sort = 2 THEN createdAt END DESC, CASE WHEN :sort = 3 THEN createdAt END ASC, createdAt DESC LIMIT 500")
     abstract fun activeDebts(sort: Int): Flow<List<CustomerDebtWithDetails>>
 
-    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE paidAmount >= totalAmount ORDER BY createdAt DESC LIMIT 100")
+    @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt, remoteSaleId FROM customer_debts WHERE paidAmount >= totalAmount ORDER BY createdAt DESC LIMIT 100")
     abstract fun paidDebts(): Flow<List<CustomerDebtWithDetails>>
 
     @Query("SELECT id, customerName, totalAmount, paidAmount, createdAt, updatedAt FROM customer_debts WHERE id = :id LIMIT 1")
