@@ -86,6 +86,8 @@ async function medicineApi(request, env, device, url, path) {
   const match = path.match(/^\/v1\/medicines(?:\/([a-f0-9-]+))?$/i);
   if (!match) return null;
   const medicineId = match[1] || null;
+  if (request.method !== "GET" && device.role !== "manager")
+    return json({ error: "manager_required" }, 403);
   if (request.method === "GET" && !medicineId) {
     const q = normalizeMedicineName(url.searchParams.get("q") || "");
     const category = validOptionalText(url.searchParams.get("category"), 80);
@@ -185,6 +187,7 @@ async function inventoryApi(request, env, device, url, path) {
   }
 
   if (path === "/v1/inventory/batches" && request.method === "POST") {
+    if (device.role !== "manager") return json({ error: "manager_required" }, 403);
     const input = await body(request);
     const medicineId = String(input.medicineId || "").trim();
     const quantity = input.quantity;
@@ -328,6 +331,7 @@ async function salesReadApi(request, env, device, url, path) {
 
 async function reportsApi(request, env, device, url, path) {
   if (path !== "/v1/reports/summary" || request.method !== "GET") return null;
+  if (device.role !== "manager") return json({ error: "manager_required" }, 403);
   const from = Number(url.searchParams.get("from"));
   const to = Number(url.searchParams.get("to"));
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from)
