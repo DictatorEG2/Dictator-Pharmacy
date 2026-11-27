@@ -330,11 +330,14 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 Text("PHARMACY MANAGEMENT SYSTEM", color = Muted, style = MaterialTheme.typography.labelSmall)
                 Spacer(Modifier.height(8.dp))
                 Text("إدارة الصيدلية", color = Color.White)
+                Text("تنبيه: بيانات هذا الجهاز محلية حاليًا ولا تتم مزامنتها مع الأجهزة الأخرى بعد.", color = Color(0xFFFFC36B), style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAdd = true }, containerColor = Crimson, contentColor = Color.White) {
-                Icon(Icons.Default.Add, contentDescription = "إضافة دواء")
+            if (session.role == "manager") {
+                FloatingActionButton(onClick = { showAdd = true }, containerColor = Crimson, contentColor = Color.White) {
+                    Icon(Icons.Default.Add, contentDescription = "إضافة دواء")
+                }
             }
         }
     ) { padding ->
@@ -349,11 +352,15 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
             Spacer(Modifier.height(12.dp))
             Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
+            if (session.role == "manager") {
+                OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
+            }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") }
+            if (session.role == "manager") {
+                Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") }
+            }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
@@ -390,17 +397,19 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                                     }
                                 }
                                 Spacer(Modifier.height(8.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedButton(onClick = { vm.adjustStock(medicine.id, -1, "خصم يدوي") }, enabled = medicine.quantity > 0) {
-                                        Icon(Icons.Default.Remove, contentDescription = null)
-                                        Text("1")
-                                    }
-                                    Button(onClick = { selected = medicine }, colors = ButtonDefaults.buttonColors(containerColor = Crimson)) {
-                                        Text("تعديل الكمية")
-                                    }
-                                    Button(onClick = { vm.adjustStock(medicine.id, 1, "إضافة يدوية") }) {
-                                        Icon(Icons.Default.Add, contentDescription = null)
-                                        Text("1")
+                                if (session.role == "manager") {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        OutlinedButton(onClick = { vm.adjustStock(medicine.id, -1, "خصم يدوي") }, enabled = medicine.quantity > 0) {
+                                            Icon(Icons.Default.Remove, contentDescription = null)
+                                            Text("1")
+                                        }
+                                        Button(onClick = { selected = medicine }, colors = ButtonDefaults.buttonColors(containerColor = Crimson)) {
+                                            Text("تعديل الكمية")
+                                        }
+                                        Button(onClick = { vm.adjustStock(medicine.id, 1, "إضافة يدوية") }) {
+                                            Icon(Icons.Default.Add, contentDescription = null)
+                                            Text("1")
+                                        }
                                     }
                                 }
                                 if (medicine.quantity == 0) Text("نفد المخزون", color = Color(0xFFFF7777))
@@ -413,7 +422,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         }
     }
 
-    if (showManager) ManagerDashboardDialog(
+    if (showManager && session.role == "manager") ManagerDashboardDialog(
         session = session,
         revenue = reportRevenue, salesCount = reportCount, lowStockCount = lowStock.size,
         outOfStockCount = outOfStock.size, activeDebts = activeDebts,
@@ -429,7 +438,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         onDismiss = { showDebts = false }
     )
 
-    if (showReports) SalesReportDialog(
+    if (showReports && session.role == "manager") SalesReportDialog(
         sales = recentSales,
         revenue = reportRevenue,
         salesCount = reportCount,
@@ -444,7 +453,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         onComplete = { lines, callback -> vm.completeSale(lines, callback) }
     )
 
-    if (showAdd) AddMedicineDialog(
+    if (showAdd && session.role == "manager") AddMedicineDialog(
         onDismiss = { showAdd = false },
         onSave = { name, category, price, quantity ->
             vm.addMedicine(name, category, price, quantity)
@@ -452,7 +461,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         }
     )
 
-    selected?.let { medicine ->
+    if (session.role == "manager") selected?.let { medicine ->
         AdjustStockDialog(
             medicine = medicine,
             onDismiss = { selected = null },
