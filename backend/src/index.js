@@ -265,14 +265,27 @@ async function adjustInventoryApi(request, env, device, path) {
     remaining -= take;
   }
   if (remaining) return json({error:"insufficient_stock",available:-delta-remaining,requested:-delta},409);
-  const statements = [];
-  for (const item of allocations) {
-    statements.push(env.DB.prepare("UPDATE inventory_batches SET quantity=quantity-?,updated_at=? WHERE id=? AND pharmacy_id=? AND quantity>=?")
-      .bind(item.take,stamp,item.id,device.pharmacy_id,item.take));
-    statements.push(env.DB.prepare("INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ? WHERE changes()=1")
-      .bind(crypto.randomUUID(),device.pharmacy_id,medicineId,item.id,device.id,-item.take,reason,stamp));
-  }
-  if (statements.length) await env.DB.batch(statements);
+  const ids = allocations.map(x => x.id), marks = ids.map(() => "?").join(",");
+  const caseSql = "CASE id " + allocations.map(() => "WHEN ? THEN ?").join(" ") + " ELSE 0 END";
+  const caseArgs = allocations.flatMap(x => [x.id, x.take]);
+  const update = env.DB.prepare("UPDATE inventory_batches SET quantity=quantity-(" + caseSql + "),updated_at=? " +
+    "WHERE pharmacy_id=? AND id IN (" + marks + ") AND quantity>=(" + caseSql + ") " +
+    "AND (SELECT COUNT(*) FROM inventory_batches WHERE pharmacy_id=? AND id IN (" + marks +
+    ") AND quantity>=(" + caseSql + "))=?")
+    .bind(...caseArgs,stamp,device.pharmacy_id,...ids,...caseArgs,device.pharmacy_id,...ids,...caseArgs,allocations.length);
+  const movementSelects = allocations.map(() =>
+    "SELECT ?,?,?,?,?, 'adjustment', ?, 'manual', ?, ?"
+  ).join(" UNION ALL ");
+  const movementArgs = allocations.flatMap(item => [
+    crypto.randomUUID(),device.pharmacy_id,medicineId,item.id,device.id,-item.take,reason,stamp
+  ]);
+  const movementInsert = env.DB.prepare(
+    "INSERT INTO stock_movements(id,pharmacy_id,medicine_id,batch_id,device_id,movement_type,quantity_delta,reference_type,reference_id,created_at) " +
+    movementSelects + " WHERE changes()=?"
+  ).bind(...movementArgs,allocations.length);
+  const results = await env.DB.batch([update,movementInsert]);
+  if ((results?.[0]?.meta?.changes || 0) !== allocations.length)
+    return json({error:"stock_changed_retry"},409);
   await audit(env,device.pharmacy_id,device,"stock_adjusted",medicineId,{delta,reason});
   return json({medicineId,delta,updated:true});
 }
