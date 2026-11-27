@@ -336,10 +336,8 @@ class PharmacyViewModel(
             try {
                 val medicine = dao.medicineById(id) ?: return@launch
                 val remoteId = medicine.remoteId ?: return@launch
-                if (delta > 0) {
-                    withContext(Dispatchers.IO) { PharmacyDataApi.receiveStock(session.token, remoteId, delta) }
-                } else {
-                    return@launch
+                withContext(Dispatchers.IO) {
+                    PharmacyDataApi.adjustStock(session.token, remoteId, delta, reason)
                 }
                 dao.setRemoteQuantity(remoteId, medicine.quantity + delta, System.currentTimeMillis())
             } catch (_: Exception) { }
