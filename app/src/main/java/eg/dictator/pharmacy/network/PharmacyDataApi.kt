@@ -9,7 +9,7 @@ import java.net.URLEncoder
 
 data class RemoteMedicine(
     val id: String, val name: String, val category: String?, val barcode: String?,
-    val unit: String, val salePriceMinor: Long, val lowStockThreshold: Int
+    val unit: String, val salePriceMinor: Long, val lowStockThreshold: Int, val quantity: Int
 )
 
 data class RemoteCustomer(
@@ -45,9 +45,21 @@ object PharmacyDataApi {
                 barcode = row.optString("barcode").takeIf { it.isNotBlank() && it != "null" },
                 unit = row.optString("unit", "piece"),
                 salePriceMinor = row.optLong("sale_price_minor"),
-                lowStockThreshold = row.optInt("low_stock_threshold")
+                lowStockThreshold = row.optInt("low_stock_threshold"), quantity = row.optInt("stock_quantity")
             )
         }
+    }
+
+    fun listAllMedicines(token: String, query: String = ""): List<RemoteMedicine> {
+        val all = mutableListOf<RemoteMedicine>()
+        var page = 1
+        while (page <= 5000) {
+            val current = listMedicines(token, query, page)
+            all += current
+            if (current.size < 20) break
+            page++
+        }
+        return all
     }
 
     fun createMedicine(
