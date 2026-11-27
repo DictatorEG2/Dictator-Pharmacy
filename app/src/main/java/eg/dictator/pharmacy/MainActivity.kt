@@ -23,7 +23,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import eg.dictator.pharmacy.network.PharmacyApi
+import eg.dictator.pharmacy.network.ManagerApi
+import eg.dictator.pharmacy.network.PharmacyDevice
 import eg.dictator.pharmacy.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -67,7 +71,7 @@ class MainActivity : ComponentActivity() {
                         key = "pharmacy_${current.pharmacyId}",
                         factory = PharmacyViewModel.factory(dao)
                     )
-                    PharmacyScreen(vm)
+                    PharmacyScreen(vm, current)
                 }
             }
         }
@@ -207,7 +211,7 @@ class PharmacyViewModel(private val dao: MedicineDao) : ViewModel() {
 }
 
 @Composable
-private fun PharmacyScreen(vm: PharmacyViewModel) {
+private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Session) {
     var search by remember { mutableStateOf("") }
     var showAdd by remember { mutableStateOf(false) }
     var showSale by remember { mutableStateOf(false) }
@@ -324,6 +328,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
     }
 
     if (showManager) ManagerDashboardDialog(
+        session = session,
         revenue = reportRevenue, salesCount = reportCount, lowStockCount = lowStock.size,
         outOfStockCount = outOfStock.size, activeDebts = activeDebts,
         onRangeChanged = vm::setReportRange, onDismiss = { showManager = false }
@@ -744,6 +749,7 @@ private fun DebtPaymentDialog(customer: String, remaining: Double, onDismiss: ()
 
 @Composable
 private fun ManagerDashboardDialog(
+    session: SecureSessionStore.Session,
     revenue: Double,
     salesCount: Int,
     lowStockCount: Int,
@@ -822,11 +828,133 @@ private fun ManagerDashboardDialog(
                     }
                 }
                 Divider()
-                Text("إدارة الأجهزة", fontWeight = FontWeight.Bold)
-                Text("ربط الأجهزة ومزامنة المخزون والمبيعات يحتاجان إلى إعداد خدمة الخادم الآمنة أولًا.", color = Muted)
-                Text("دعوات الانضمام بالكود وQR ستظهر هنا بعد تفعيل الخادم. لم يتم إنشاء رمز وهمي أو ربط غير فعلي.", color = Color(0xFFFFC36B))
+                ManagerDevicesSection(session)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
     )
+}
+
+
+@Composable
+private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
+    var devices by remember { mutableStateOf<List<PharmacyDevice>>(emptyList()) }
+    var inviteCode by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+
+    fun refreshDevices() {
+        if (session.role != "manager") return
+        loading = true
+        scope.launch {
+            try {
+                devices = withContext(Dispatchers.IO) { ManagerApi.listDevices(session.token) }
+                message = null
+            } catch (error: Exception) {
+                message = error.message ?: "تعذر تحميل الأجهزة"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(session.deviceId) { refreshDevices() }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("إدارة الأجهزة", fontWeight = FontWeight.Bold)
+        if (session.role != "manager") {
+            Text("إدارة الأجهزة والدعوات متاحة لمدير الصيدلية فقط.", color = Muted)
+        } else {
+            Button(
+                onClick = {
+                    loading = true
+                    scope.launch {
+                        try {
+                            val invite = withContext(Dispatchers.IO) { ManagerApi.createInvite(session.token) }
+                            inviteCode = invite.code
+                            message = "صلاحية الرمز 10 دقائق ويستخدم مرة واحدة"
+                            refreshDevices()
+                        } catch (error: Exception) {
+                            message = error.message ?: "تعذر إنشاء الدعوة"
+                        } finally {
+                            loading = false
+                        }
+                    }
+                },
+                enabled = !loading,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Crimson)
+            ) { Text(if (loading) "جارٍ التنفيذ..." else "إنشاء دعوة لموظف") }
+
+            inviteCode?.let { code ->
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("رمز الدعوة", color = Muted)
+                        Text(code, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
+                            Text("نسخ الرمز")
+                        }
+                    }
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("أجهزة الصيدلية", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                TextButton(onClick = { refreshDevices() }, enabled = !loading) { Text("تحديث") }
+            }
+            if (devices.isEmpty() && !loading) Text("لا توجد أجهزة إضافية مسجلة حتى الآن.", color = Muted)
+            devices.forEach { device ->
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(device.name, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            when (device.status) {
+                                "pending" -> "بانتظار موافقة المدير"
+                                "active" -> if (device.role == "manager") "مدير نشط" else "موظف نشط"
+                                "revoked" -> "تم إيقاف الجهاز"
+                                else -> device.status
+                            },
+                            color = if (device.status == "pending") Color(0xFFFFC36B) else Muted
+                        )
+                        if (device.status == "pending") {
+                            Button(
+                                onClick = {
+                                    loading = true
+                                    scope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) { ManagerApi.approveDevice(session.token, device.id) }
+                                            message = "تمت الموافقة. يجب تسجيل دخول الجهاز بعد الموافقة لاستلام رمز الدخول."
+                                            refreshDevices()
+                                        } catch (error: Exception) {
+                                            message = error.message ?: "تعذرت الموافقة"
+                                        } finally { loading = false }
+                                    }
+                                },
+                                enabled = !loading
+                            ) { Text("الموافقة على الجهاز") }
+                        } else if (device.status == "active" && device.role == "staff") {
+                            TextButton(
+                                onClick = {
+                                    loading = true
+                                    scope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) { ManagerApi.revokeDevice(session.token, device.id) }
+                                            message = "تم إيقاف الجهاز"
+                                            refreshDevices()
+                                        } catch (error: Exception) {
+                                            message = error.message ?: "تعذر إيقاف الجهاز"
+                                        } finally { loading = false }
+                                    }
+                                },
+                                enabled = !loading
+                            ) { Text("إيقاف الجهاز", color = Color(0xFFFF8888)) }
+                        }
+                    }
+                }
+            }
+            message?.let { Text(it, color = Color(0xFFFFC36B)) }
+        }
+    }
 }
