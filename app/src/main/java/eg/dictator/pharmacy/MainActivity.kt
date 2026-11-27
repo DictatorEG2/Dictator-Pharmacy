@@ -463,16 +463,19 @@ class PharmacyViewModel(
         }
     }
 
-    fun adjustStock(id: Long, delta: Int, reason: String) {
+    fun adjustStock(id: Long, delta: Int, reason: String, done: (Result<Unit>) -> Unit = {}) {
         viewModelScope.launch {
             try {
-                val medicine = dao.medicineById(id) ?: return@launch
-                val remoteId = medicine.remoteId ?: return@launch
+                val medicine = dao.medicineById(id) ?: error("الدواء غير موجود")
+                val remoteId = medicine.remoteId ?: error("هذا الدواء غير مرتبط بالخادم")
                 withContext(Dispatchers.IO) {
                     PharmacyDataApi.adjustStock(session.token, remoteId, delta, reason)
                 }
                 dao.setRemoteQuantity(remoteId, medicine.quantity + delta, System.currentTimeMillis())
-            } catch (_: Exception) { }
+                done(Result.success(Unit))
+            } catch (error: Exception) {
+                done(Result.failure(error))
+            }
         }
     }
 
@@ -611,19 +614,10 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                                 }
                                 Spacer(Modifier.height(8.dp))
                                 if (session.role == "manager") {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        OutlinedButton(onClick = { vm.adjustStock(medicine.id, -1, "خصم يدوي") }, enabled = medicine.quantity > 0) {
-                                            Icon(Icons.Default.Remove, contentDescription = null)
-                                            Text("1")
-                                        }
-                                        Button(onClick = { selected = medicine }, colors = ButtonDefaults.buttonColors(containerColor = Crimson)) {
-                                            Text("تعديل الكمية")
-                                        }
-                                        Button(onClick = { vm.adjustStock(medicine.id, 1, "إضافة يدوية") }) {
-                                            Icon(Icons.Default.Add, contentDescription = null)
-                                            Text("1")
-                                        }
-                                    }
+                                    Button(
+                                        onClick = { selected = medicine },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Crimson)
+                                    ) { Text("تعديل الكمية") }
                                 }
                                 if (medicine.quantity == 0) Text("نفد المخزون", color = Color(0xFFFF7777))
                                 else if (medicine.quantity <= medicine.minimumQuantity) Text("مخزون منخفض", color = Color(0xFFFFC36B))
@@ -677,9 +671,11 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         AdjustStockDialog(
             medicine = medicine,
             onDismiss = { selected = null },
-            onApply = { delta ->
-                vm.adjustStock(medicine.id, delta, "تعديل كمية يدوي")
-                selected = null
+            onApply = { delta, done ->
+                vm.adjustStock(medicine.id, delta, "تعديل كمية يدوي") { result ->
+                    result.onSuccess { selected = null }
+                    done(result)
+                }
             }
         )
     }
@@ -740,30 +736,44 @@ private fun AddMedicineDialog(
 }
 
 @Composable
-private fun AdjustStockDialog(medicine: Medicine, onDismiss: () -> Unit, onApply: (Int) -> Unit) {
+private fun AdjustStockDialog(
+    medicine: Medicine, onDismiss: () -> Unit,
+    onApply: (Int, (Result<Unit>) -> Unit) -> Unit
+) {
     var amount by remember { mutableStateOf("1") }
     var adding by remember { mutableStateOf(true) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("تعديل مخزون " + medicine.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { adding = true }) { Text("إضافة") }
-                    OutlinedButton(onClick = { adding = false }) { Text("خصم") }
+                    OutlinedButton(enabled = !saving, onClick = { adding = true }) { Text("إضافة") }
+                    OutlinedButton(enabled = !saving, onClick = { adding = false }) { Text("خصم") }
                 }
-                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit); error = null }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !saving)
                 Text("المخزون الحالي: " + medicine.quantity)
+                error?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(enabled = !saving, onClick = {
                 val value = amount.toIntOrNull()
-                if (value != null && value > 0 && (adding || value <= medicine.quantity)) onApply(if (adding) value else -value)
-            }) { Text("تأكيد") }
+                if (value == null || value <= 0 || (!adding && value > medicine.quantity)) {
+                    error = "راجع الكمية المطلوبة"
+                } else {
+                    saving = true
+                    onApply(if (adding) value else -value) { result ->
+                        saving = false
+                        result.onFailure { error = it.message ?: "تعذر تعديل المخزون" }
+                    }
+                }
+            }) { Text(if (saving) "جارٍ الحفظ..." else "تأكيد") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } }
     )
 }
 
