@@ -47,6 +47,15 @@ abstract class MedicineDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertSale(sale: Sale): Long
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun upsertRemoteSale(sale: Sale): Long
+
+    @Query("SELECT id, total, createdAt, remoteSaleId FROM sales WHERE remoteSaleId=:remoteSaleId LIMIT 1")
+    abstract suspend fun saleByRemoteSaleId(remoteSaleId: String): Sale?
+
+    @Query("DELETE FROM sale_items WHERE saleId=:saleId")
+    abstract suspend fun clearSaleItems(saleId: Long)
+
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertDebt(debt: CustomerDebt): Long
