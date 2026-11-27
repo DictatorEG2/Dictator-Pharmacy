@@ -22,6 +22,42 @@ object PharmacyApi {
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 20_000
 
+    fun requestEnrollment(inviteCode: String, deviceName: String): JSONObject {
+        require(inviteCode.matches(Regex("^[A-Fa-f0-9]{16}$"))) { "رمز الدعوة يجب أن يتكون من 16 حرفًا ورقمًا" }
+        require(deviceName.isNotBlank()) { "اكتب اسم الجهاز" }
+        val payload = JSONObject().put("code", inviteCode.trim().uppercase()).put("deviceName", deviceName.trim())
+        val connection = (URL("$BASE_URL/v1/enroll").openConnection() as HttpURLConnection)
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            val response = try { JSONObject(text) } catch (_: Exception) {
+                throw IOException("استجابة غير مفهومة من الخادم")
+            }
+            if (status !in 200..299) {
+                val code = response.optString("error", "server_error")
+                throw IOException(when (code) {
+                    "invite_invalid_or_expired" -> "رمز الدعوة غير صالح أو انتهت صلاحيته"
+                    "enrollment_rate_limited" -> "محاولات الانضمام كثيرة. حاول لاحقًا"
+                    else -> "تعذر إرسال طلب الانضمام: $code"
+                })
+            }
+            if (response.optString("status") != "pending" || response.optString("deviceId").isBlank()) {
+                throw IOException("لم يؤكد الخادم تسجيل طلب الانضمام")
+            }
+            return response
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     fun signInWithDeviceToken(token: String): PharmacyRegistration {
         require(token.length >= 32) { "رمز الدخول غير صحيح" }
         val connection = (URL("$BASE_URL/v1/me").openConnection() as HttpURLConnection)
