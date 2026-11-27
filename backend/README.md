@@ -31,22 +31,22 @@ The existing production database has migrations `0001_initial.sql` through `0004
 - `POST /v1/manager/devices/{id}/revoke` (manager bearer token; same pharmacy only)
 - `GET /v1/me` (device bearer token)
 - `GET /v1/medicines?q=part&category=...` (device bearer token; tenant-scoped search, 20 rows per page; optional `page` parameter)
-- `POST /v1/medicines` (device bearer token; create a medicine using `name`, optional `category`, `barcode`, `imageUrl`, `unit`, `salePriceMinor`, and `lowStockThreshold`)
-- `PUT /v1/medicines/{id}` (device bearer token; update an active medicine; send `name`, `salePriceMinor`, and `lowStockThreshold`, with optional metadata)
-- `DELETE /v1/medicines/{id}` (device bearer token; soft-deactivate the medicine without deleting its history)
+- `POST /v1/medicines` (manager bearer token only; create a medicine using `name`, optional `category`, `barcode`, `imageUrl`, `unit`, `salePriceMinor`, and `lowStockThreshold`)
+- `PUT /v1/medicines/{id}` (manager bearer token only; update an active medicine; send `name`, `salePriceMinor`, and `lowStockThreshold`, with optional metadata)
+- `DELETE /v1/medicines/{id}` (manager bearer token only; soft-deactivate the medicine without deleting its history)
 - `GET /v1/inventory/batches?medicineId=...&page=1` (device bearer token; pharmacy-scoped batch listing ordered by nearest expiry, 20 rows per page)
-- `POST /v1/inventory/batches` (device bearer token; receive stock for an active medicine; JSON fields: `medicineId`, positive integer `quantity`, optional `batchNumber`, optional ISO `expiryDate`, optional integer `purchasePriceMinor`; batch and purchase movement are written together)
+- `POST /v1/inventory/batches` (manager bearer token only; receive stock for an active medicine; JSON fields: `medicineId`, positive integer `quantity`, optional `batchNumber`, optional ISO `expiryDate`, optional integer `purchasePriceMinor`; batch and purchase movement are written together)
 - `GET /v1/customers?q=...&page=1` (device bearer token; tenant-scoped customer search, 20 rows per page)
 - `POST /v1/customers` JSON: `{\"name\":\"Customer name\",\"phone\":\"optional\",\"notes\":\"optional\"}`
 - `PUT /v1/customers/{id}` (device bearer token; update a customer in the current pharmacy only)
 - `GET /v1/sales?page=1&from=...&to=...` (device bearer token; paginated sale history with paid and remaining balances)
 - `GET /v1/sales/{id}` (device bearer token; sale details, item snapshots and payment history)
 - `POST /v1/sales/{id}/payments` JSON: `{\"amountMinor\":2500,\"paymentMethod\":\"cash\",\"notes\":\"optional\"}`; atomically records a partial payment only when it does not exceed the outstanding balance.
-- `GET /v1/reports/summary?from=...&to=...` (device bearer token; summary totals and top ten medicines for a Unix-seconds time range)
+- `GET /v1/reports/summary?from=...&to=...` (manager bearer token only; summary totals and top ten medicines for a Unix-seconds time range)
 - `POST /v1/sales` (device bearer token; creates a sale and deducts stock FEFO in one D1 batch). JSON: `{"operationId":"client-generated-stable-id","items":[{"medicineId":"uuid","quantity":2}],"customerId":null,"paymentAmountMinor":5000,"paymentMethod":"cash"}`. `operationId` is required (16–80 URL-safe characters) and makes retries idempotent; reusing it with a different payload returns 409. Item quantities are positive integers; the server reads active medicine prices and calculates totals itself. Optional `customerId` supports walk-in sales; `paymentAmountMinor` defaults to zero and may be partial, while payment methods are `cash`, `card`, `transfer`, or `other`.
 
 ## Current limitations
-- The Worker implements pharmacy registration, device enrollment, tenant-scoped customers and medicine catalog, inventory batch receiving/listing, sale creation/history/details/payments, and date-range sales summaries. Sale creation allocates unexpired stock by FEFO, conditionally decrements every selected batch, and writes the sale, item snapshots, stock movements, optional payment, idempotency record, and audit entry in one D1 batch. A stale stock allocation fails closed; insufficient stock returns HTTP 409. Repeated operation IDs with the same payload return the original result.
+- The Worker implements pharmacy registration, device enrollment, tenant-scoped customers and medicine catalog, inventory batch receiving/listing, sale creation/history/details/payments, and date-range sales summaries. Staff devices may perform sales and customer operations; catalog writes, stock receiving, and reports require the manager role. Sale creation allocates unexpired stock by FEFO, conditionally decrements every selected batch, and writes the sale, item snapshots, stock movements, optional payment, idempotency record, and audit entry in one D1 batch. A stale stock allocation fails closed; insufficient stock returns HTTP 409. Repeated operation IDs with the same payload return the original result.
 - Backup/restore and full offline-to-cloud synchronization are not implemented yet. Android currently has onboarding and manager/staff device flows; the medicine, inventory, sales and debt screens are still local Room data and are not yet synchronized to the Worker.
 - Do not use real pharmacy data until those features and tenant-isolation tests are complete.
 - Before production launch, add stronger abuse protection (for example Turnstile), monitoring, retention policies, and automated tests for cross-tenant access.
