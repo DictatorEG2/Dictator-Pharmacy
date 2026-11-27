@@ -128,6 +128,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
     var showSale by remember { mutableStateOf(false) }
     var showReports by remember { mutableStateOf(false) }
     var showDebts by remember { mutableStateOf(false) }
+    var showManager by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
@@ -176,6 +177,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") }
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
@@ -234,6 +237,12 @@ private fun PharmacyScreen(vm: PharmacyViewModel) {
             }
         }
     }
+
+    if (showManager) ManagerDashboardDialog(
+        revenue = reportRevenue, salesCount = reportCount, lowStockCount = lowStock.size,
+        outOfStockCount = outOfStock.size, activeDebts = activeDebts,
+        onRangeChanged = vm::setReportRange, onDismiss = { showManager = false }
+    )
 
     if (showDebts) CustomerDebtsDialog(
         medicines = allMedicines, debts = activeDebts, paidDebts = paidDebts,
@@ -645,4 +654,94 @@ private fun DebtPaymentDialog(customer: String, remaining: Double, onDismiss: ()
     }, confirmButton = {
         TextButton(onClick = { val v = amount.toDoubleOrNull(); if (v != null && v > 0 && v <= remaining) onPay(v) }) { Text("تسجيل الدفعة") }
     }, dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } })
+}
+
+
+@Composable
+private fun ManagerDashboardDialog(
+    revenue: Double,
+    salesCount: Int,
+    lowStockCount: Int,
+    outOfStockCount: Int,
+    activeDebts: List<CustomerDebtWithDetails>,
+    onRangeChanged: (Long, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var period by remember { mutableIntStateOf(0) }
+    fun applyPeriod(selected: Int) {
+        val now = java.util.Calendar.getInstance()
+        val start = java.util.Calendar.getInstance()
+        when (selected) {
+            0 -> {
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            1 -> {
+                start.set(java.util.Calendar.DAY_OF_WEEK, start.firstDayOfWeek)
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+            else -> {
+                start.set(java.util.Calendar.DAY_OF_MONTH, 1)
+                start.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                start.set(java.util.Calendar.MINUTE, 0)
+                start.set(java.util.Calendar.SECOND, 0)
+                start.set(java.util.Calendar.MILLISECOND, 0)
+            }
+        }
+        period = selected
+        onRangeChanged(start.timeInMillis, now.timeInMillis + 1)
+    }
+    LaunchedEffect(Unit) { applyPeriod(0) }
+    val debtBalance = activeDebts.sumOf { (it.debt.totalAmount - it.debt.paidAmount).coerceAtLeast(0.0) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("لوحة المدير") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 540.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("نظرة عامة على أداء الصيدلية", color = Muted)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("اليوم", "الأسبوع", "الشهر").forEachIndexed { index, label ->
+                        OutlinedButton(
+                            onClick = { applyPeriod(index) },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 2.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (period == index) Crimson else Color.Transparent,
+                                contentColor = Color.White
+                            )
+                        ) { Text(label) }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SummaryTile("المبيعات", "%.2f".format(revenue) + " ج.م", Modifier.weight(1f))
+                    SummaryTile("الفواتير", salesCount.toString(), Modifier.weight(1f))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SummaryTile("النواقص", lowStockCount.toString(), Modifier.weight(1f))
+                    SummaryTile("النافد", outOfStockCount.toString(), Modifier.weight(1f))
+                }
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("مديونيات العملاء المفتوحة", color = Muted)
+                        Text("${activeDebts.size} مديونية", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("إجمالي المتبقي: %.2f ج.م".format(debtBalance), color = Color(0xFFFFC36B))
+                    }
+                }
+                Divider()
+                Text("إدارة الأجهزة", fontWeight = FontWeight.Bold)
+                Text("ربط الأجهزة ومزامنة المخزون والمبيعات يحتاجان إلى إعداد خدمة الخادم الآمنة أولًا.", color = Muted)
+                Text("دعوات الانضمام بالكود وQR ستظهر هنا بعد تفعيل الخادم. لم يتم إنشاء رمز وهمي أو ربط غير فعلي.", color = Color(0xFFFFC36B))
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
+    )
 }
