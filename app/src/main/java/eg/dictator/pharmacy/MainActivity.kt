@@ -660,9 +660,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
 
     if (showAdd && session.role == "manager") AddMedicineDialog(
         onDismiss = { showAdd = false },
-        onSave = { name, category, price, quantity ->
-            vm.addMedicine(name, category, price, quantity)
-            showAdd = false
+        onSave = { name, category, price, quantity, done ->
+            vm.addMedicine(name, category, price, quantity, done)
         }
     )
 
@@ -689,31 +688,46 @@ private fun SummaryTile(label: String, value: String, modifier: Modifier = Modif
 }
 
 @Composable
-private fun AddMedicineDialog(onDismiss: () -> Unit, onSave: (String, String, Double, Int) -> Unit) {
+private fun AddMedicineDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String, Double, Int, (Result<Unit>) -> Unit) -> Unit
+) {
     var name by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var quantity by remember { mutableStateOf("0") }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         title = { Text("إضافة دواء") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("اسم الدواء") })
-                OutlinedTextField(category, { category = it }, label = { Text("القسم") })
-                OutlinedTextField(price, { price = it }, label = { Text("سعر البيع") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(name, { name = it; error = null }, label = { Text("اسم الدواء") }, enabled = !saving)
+                OutlinedTextField(category, { category = it; error = null }, label = { Text("القسم") }, enabled = !saving)
+                OutlinedTextField(price, { price = it; error = null }, label = { Text("سعر البيع") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), enabled = !saving)
+                OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit); error = null }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !saving)
+                error?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(enabled = !saving, onClick = {
                 val p = price.toDoubleOrNull()
                 val q = quantity.toIntOrNull()
-                if (name.isNotBlank() && category.isNotBlank() && p != null && p >= 0 && q != null && q >= 0) onSave(name, category, p, q)
-            }) { Text("حفظ") }
+                if (name.isBlank() || category.isBlank() || p == null || p < 0 || q == null || q < 0) {
+                    error = "راجع اسم الدواء والقسم والسعر والكمية"
+                } else {
+                    saving = true
+                    onSave(name, category, p, q) { result ->
+                        saving = false
+                        result.onSuccess { onDismiss() }
+                            .onFailure { error = it.message ?: "تعذر حفظ الدواء على الخادم" }
+                    }
+                }
+            }) { Text(if (saving) "جارٍ الحفظ..." else "حفظ") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } }
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text("إلغاء") } }
     )
 }
 
