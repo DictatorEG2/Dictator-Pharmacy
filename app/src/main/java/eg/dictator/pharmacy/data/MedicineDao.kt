@@ -18,10 +18,10 @@ abstract class MedicineDao {
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE quantity <= 0 ORDER BY name COLLATE NOCASE LIMIT 500")
     abstract fun outOfStock(): Flow<List<Medicine>>
 
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines WHERE quantity > 0 AND quantity <= minimumQuantity ORDER BY quantity ASC LIMIT 500")
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE quantity > 0 AND quantity <= minimumQuantity ORDER BY quantity ASC LIMIT 500")
     abstract fun lowStock(): Flow<List<Medicine>>
 
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines WHERE id = :id LIMIT 1")
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE id = :id LIMIT 1")
     abstract suspend fun medicineById(id: Long): Medicine?
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
