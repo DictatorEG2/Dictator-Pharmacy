@@ -27,6 +27,17 @@ data class RemoteReport(
     val dueMinor: Long
 )
 
+data class RemoteSaleItem(
+    val medicineId: String, val medicineName: String, val quantity: Int,
+    val unitPriceMinor: Long, val lineTotalMinor: Long
+)
+
+data class RemotePayment(val amountMinor: Long, val createdAt: Long)
+
+data class RemoteSaleDetails(
+    val sale: RemoteSale, val items: List<RemoteSaleItem>, val payments: List<RemotePayment>
+)
+
 /**
  * Tenant-scoped pharmacy data API. All calls require the current device token.
  * Invoke from Dispatchers.IO. Monetary values are integer minor units (piastres).
@@ -151,6 +162,49 @@ object PharmacyDataApi {
                 customerName = row.optString("customer_name").takeIf { it.isNotBlank() && it != "null" }
             )
         }
+    }
+
+    fun getSaleDetails(token: String, saleId: String): RemoteSaleDetails {
+        val result = request("/v1/sales/$saleId", "GET", token, null)
+        val sale = RemoteSale(
+            id = result.optString("id"),
+            invoiceNumber = result.optString("invoice_number"),
+            status = result.optString("status"),
+            totalMinor = result.optLong("total_minor"),
+            paidMinor = result.optLong("paid_minor"),
+            dueMinor = result.optLong("due_minor"),
+            createdAt = result.optLong("created_at"),
+            customerName = result.optString("customer_name").takeIf { it.isNotBlank() && it != "null" }
+        )
+        val itemRows = result.optJSONArray("items") ?: JSONArray()
+        val items = (0 until itemRows.length()).mapNotNull { i ->
+            val row = itemRows.optJSONObject(i) ?: return@mapNotNull null
+            RemoteSaleItem(
+                medicineId = row.optString("medicine_id"),
+                medicineName = row.optString("medicine_name_snapshot"),
+                quantity = row.optInt("quantity"),
+                unitPriceMinor = row.optLong("unit_price_minor"),
+                lineTotalMinor = row.optLong("line_total_minor")
+            )
+        }
+        val paymentRows = result.optJSONArray("payments") ?: JSONArray()
+        val payments = (0 until paymentRows.length()).mapNotNull { i ->
+            val row = paymentRows.optJSONObject(i) ?: return@mapNotNull null
+            RemotePayment(row.optLong("amount_minor"), row.optLong("created_at"))
+        }
+        return RemoteSaleDetails(sale, items, payments)
+    }
+
+    fun listAllSales(token: String): List<RemoteSale> {
+        val all = mutableListOf<RemoteSale>()
+        var page = 1
+        while (page <= 5000) {
+            val current = getSales(token, page)
+            all += current
+            if (current.size < 20) break
+            page++
+        }
+        return all
     }
 
     fun getReport(token: String, fromUnixSeconds: Long, toUnixSeconds: Long): RemoteReport {
