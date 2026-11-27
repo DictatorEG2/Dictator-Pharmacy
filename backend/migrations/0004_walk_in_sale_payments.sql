@@ -1,5 +1,3 @@
--- Allow payments for walk-in sales that have no customer record.
--- Existing customer-linked payments are preserved.
 
 CREATE TABLE sale_payments_v2 (
   id TEXT PRIMARY KEY,
