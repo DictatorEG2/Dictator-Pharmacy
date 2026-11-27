@@ -22,9 +22,13 @@ data class RemoteSale(
     val createdAt: Long, val customerName: String?
 )
 
+data class RemoteTopSelling(
+    val medicineName: String, val soldQuantity: Int, val revenueMinor: Long
+)
+
 data class RemoteReport(
     val saleCount: Int, val revenueMinor: Long, val paidMinor: Long,
-    val dueMinor: Long
+    val dueMinor: Long, val topSelling: List<RemoteTopSelling> = emptyList()
 )
 
 data class RemoteSaleItem(
@@ -212,11 +216,21 @@ object PharmacyDataApi {
             "/v1/reports/summary?from=$fromUnixSeconds&to=$toUnixSeconds",
             "GET", token, null
         )
+        val rows = result.optJSONArray("topSelling") ?: JSONArray()
+        val top = (0 until rows.length()).mapNotNull { i ->
+            val row = rows.optJSONObject(i) ?: return@mapNotNull null
+            RemoteTopSelling(
+                medicineName = row.optString("medicine_name"),
+                soldQuantity = row.optInt("sold_quantity"),
+                revenueMinor = row.optLong("revenue_minor")
+            )
+        }
         return RemoteReport(
             saleCount = result.optInt("saleCount"),
             revenueMinor = result.optLong("revenueMinor"),
             paidMinor = result.optLong("paidMinor"),
-            dueMinor = result.optLong("dueMinor")
+            dueMinor = result.optLong("dueMinor"),
+            topSelling = top
         )
     }
 
