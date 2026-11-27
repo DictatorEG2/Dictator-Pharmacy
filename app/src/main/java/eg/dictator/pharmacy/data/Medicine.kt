@@ -51,3 +51,17 @@ data class SaleItem(
 )
 
 data class SaleLineRequest(val medicineId: Long, val quantity: Int)
+
+
+data class SaleWithItems(
+    @androidx.room.Embedded val sale: Sale,
+    @androidx.room.Relation(parentColumn = "id", entityColumn = "saleId")
+    val items: List<SaleItem>
+)
+
+data class TopSellingMedicine(
+    val medicineId: Long,
+    val medicineName: String,
+    val soldQuantity: Int,
+    val revenue: Double
+)
