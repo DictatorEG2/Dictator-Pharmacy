@@ -30,9 +30,13 @@ The existing database has migrations `0001_initial.sql`, `0002_multi_pharmacy.sq
 - `POST /v1/manager/devices/{id}/approve` (manager bearer token; same pharmacy only; returns staff token once)
 - `POST /v1/manager/devices/{id}/revoke` (manager bearer token; same pharmacy only)
 - `GET /v1/me` (device bearer token)
+- `GET /v1/medicines?q=part&category=...` (device bearer token; tenant-scoped search, 20 rows per page; optional `page` parameter)
+- `POST /v1/medicines` (device bearer token; create a medicine using `name`, optional `category`, `barcode`, `imageUrl`, `unit`, `salePriceMinor`, and `lowStockThreshold`)
+- `PUT /v1/medicines/{id}` (device bearer token; update an active medicine; send `name`, `salePriceMinor`, and `lowStockThreshold`, with optional metadata)
+- `DELETE /v1/medicines/{id}` (device bearer token; soft-deactivate the medicine without deleting its history)
 
 ## Current limitations
-- The current Worker implements pharmacy registration and device enrollment only. Migrations `0003` and `0004` provide tenant-scoped business tables; medicine, inventory, sales, customer-ledger, and synchronization endpoints and conflict-resolution logic are still pending.
+- The Worker implements pharmacy registration, device enrollment, and a tenant-scoped medicine catalog API. Inventory batches, sales, customer ledger, and synchronization endpoints/conflict-resolution logic are still pending.
 - Backup/restore and Android registration/synchronization UI are not implemented yet.
 - Do not use real pharmacy data until those features and tenant-isolation tests are complete.
 - Before production launch, add stronger abuse protection (for example Turnstile), monitoring, retention policies, and automated tests for cross-tenant access.
