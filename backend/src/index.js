@@ -80,12 +80,12 @@ async function handle(request, env) {
     const name = String(input.deviceName || "").trim().slice(0, 80);
     if (!/^[A-F0-9]{12}$/.test(code) || !name) return json({ error: "invalid_code_or_device_name" }, 400);
     const codeHash = await hash(code), timestamp = now();
-    const invite = await env.DB.prepare("SELECT code_hash,pharmacy_id,expires_at,used_at FROM invitations WHERE code_hash=?").bind(codeHash).first();
+    const invite = await env.DB.prepare("SELECT i.code_hash,i.pharmacy_id,i.expires_at,i.used_at FROM invitations i JOIN pharmacies p ON p.id=i.pharmacy_id WHERE i.code_hash=? AND p.status='active'").bind(codeHash).first();
     if (!invite || invite.used_at || invite.expires_at < timestamp || !invite.pharmacy_id) return json({ error: "invite_invalid_or_expired" }, 410);
     const id = crypto.randomUUID();
     const results = await env.DB.batch([
-      env.DB.prepare("UPDATE invitations SET used_at=? WHERE code_hash=? AND used_at IS NULL AND expires_at>=? AND pharmacy_id=?")
-        .bind(timestamp, codeHash, timestamp, invite.pharmacy_id),
+      env.DB.prepare("UPDATE invitations SET used_at=? WHERE code_hash=? AND used_at IS NULL AND expires_at>=? AND pharmacy_id=? AND EXISTS(SELECT 1 FROM pharmacies WHERE id=? AND status='active')")
+        .bind(timestamp, codeHash, timestamp, invite.pharmacy_id, invite.pharmacy_id),
       env.DB.prepare("INSERT INTO devices(id,pharmacy_id,name,role,status,created_at) SELECT ?,?,?,'staff','pending',? WHERE changes()=1")
         .bind(id, invite.pharmacy_id, name, timestamp)
     ]);
