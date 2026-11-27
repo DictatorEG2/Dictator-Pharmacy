@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class MedicineDao {
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR category LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 100")
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR category LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 100")
     abstract fun search(query: String): Flow<List<Medicine>>
 
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt FROM medicines ORDER BY name COLLATE NOCASE LIMIT 500")
@@ -26,6 +26,21 @@ abstract class MedicineDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertMedicine(medicine: Medicine): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun upsertRemoteMedicine(medicine: Medicine)
+
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE remoteId IS NOT NULL")
+    abstract suspend fun remoteMedicines(): List<Medicine>
+
+    @Query("DELETE FROM medicines WHERE remoteId IS NOT NULL AND remoteId NOT IN (:remoteIds)")
+    abstract suspend fun removeMissingRemoteMedicines(remoteIds: List<String>)
+
+    @Query("UPDATE medicines SET quantity=:quantity, updatedAt=:now WHERE remoteId=:remoteId")
+    abstract suspend fun setRemoteQuantity(remoteId: String, quantity: Int, now: Long): Int
+
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE remoteId=:remoteId LIMIT 1")
+    abstract suspend fun medicineByRemoteId(remoteId: String): Medicine?
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertSale(sale: Sale): Long
