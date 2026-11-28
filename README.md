@@ -52,3 +52,11 @@ Source and license: [Egyptian Drug Database (CC0-1.0)](https://github.com/karem5
 ## Sale discounts
 
 Percentage discounts are applied to the gross sale amount and persisted as a separate `discount_minor` value for auditability. **Apply backend migration `0005_sale_discounts.sql` before deploying the updated Worker**; do not deploy the updated Worker before applying the migration.
+
+## Egyptian medicine reference catalogue
+
+The Android app bundles and imports the public `eg-drugs` Egyptian medicine dataset, containing more than 27,000 records with Arabic and English trade names, active ingredients, manufacturers, reference prices, barcodes, categories, and usage text. The catalogue is browsable without typing a search and is paginated locally in groups of 20. It is separate from each pharmacy's actual stock and does not automatically create inventory items.
+
+Data source: [Egyptian Drug Database (eg-drugs)](https://github.com/mahmoudfalous/eg-drugs) by Mahmoud Mohamed. Dataset licence: CC BY 4.0. Attribution is retained here. Reference prices may be outdated or differ from a pharmacy's actual selling price; managers set their own selling price when adding stock.
+
+Package photographs are not included in this dataset. The app displays a saved pharmacy product photo when one exists and otherwise clearly uses a neutral medicine placeholder. Do not mistake that placeholder for the real package.
