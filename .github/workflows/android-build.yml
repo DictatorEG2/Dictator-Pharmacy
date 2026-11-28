@@ -17,6 +17,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Download CC0 Egyptian medicine reference catalog
+        run: |
+          mkdir -p app/src/main/assets
+          curl --fail --location --retry 3 --output app/src/main/assets/egyptian-drugs.csv https://raw.githubusercontent.com/karem505/egyptian-drug-database/main/data/egyptian-drugs.csv
+          test -s app/src/main/assets/egyptian-drugs.csv
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
