@@ -630,7 +630,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                         Text("قناة تيليجرام")
                     }
                 }
-                Text("تتم المزامنة تلقائيًا عند توفر الإنترنت مع الاحتفاظ بالبيانات محليًا.", color = Blue, style = MaterialTheme.typography.bodySmall)
+                Text("دليل الأدوية محفوظ محليًا ويعمل دون إنترنت. البيع وتعديل المخزون والمديونيات تتطلب الاتصال بالخادم حاليًا.", color = Blue, style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButton = {
@@ -664,10 +664,14 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                     referenceMedicines.forEach { reference ->
                         val normalizedAr = normalizeMedicineQuery(reference.commercialNameAr)
                         val normalizedEn = normalizeMedicineQuery(reference.commercialNameEn)
+                        val normalizedCombined = normalizeMedicineQuery(
+                            reference.commercialNameAr + " " + reference.commercialNameEn
+                        )
                         val existingMedicine = allMedicines.firstOrNull {
                             val savedName = normalizeMedicineQuery(it.name)
-                            (normalizedAr.isNotBlank() && savedName.contains(normalizedAr)) ||
-                                (normalizedEn.isNotBlank() && savedName.contains(normalizedEn))
+                            savedName == normalizedAr ||
+                                savedName == normalizedEn ||
+                                savedName == normalizedCombined
                         }
                         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
