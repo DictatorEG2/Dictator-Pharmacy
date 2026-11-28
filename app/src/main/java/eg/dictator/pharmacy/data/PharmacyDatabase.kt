@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class],
-    version = 6,
+    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class, SaleReturn::class, MedicineReference::class],
+    version = 9,
     exportSchema = true
 )
 abstract class PharmacyDatabase : RoomDatabase() {
@@ -61,13 +61,40 @@ abstract class PharmacyDatabase : RoomDatabase() {
             }
         }
 
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS sale_returns (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, saleItemId INTEGER NOT NULL, medicineId INTEGER NOT NULL, quantity INTEGER NOT NULL, refundAmount REAL NOT NULL, reason TEXT NOT NULL, createdAt INTEGER NOT NULL, FOREIGN KEY(saleItemId) REFERENCES sale_items(id) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_sale_returns_saleItemId ON sale_returns(saleItemId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_sale_returns_createdAt ON sale_returns(createdAt)")
+            }
+        }
+
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS medicine_reference (id INTEGER NOT NULL PRIMARY KEY, commercialNameEn TEXT NOT NULL, commercialNameAr TEXT NOT NULL, scientificName TEXT NOT NULL, manufacturer TEXT NOT NULL, drugClass TEXT NOT NULL, route TEXT NOT NULL, priceEgp REAL)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_commercialNameAr ON medicine_reference(commercialNameAr)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_scientificName ON medicine_reference(scientificName)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_manufacturer ON medicine_reference(manufacturer)")
+            }
+        }
+
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE medicine_reference ADD COLUMN barcode TEXT")
+                database.execSQL("ALTER TABLE medicine_reference ADD COLUMN uses TEXT NOT NULL DEFAULT ''")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_barcode ON medicine_reference(barcode)")
+            }
+        }
+
         @Volatile private var instance: PharmacyDatabase? = null
         fun get(context: Context, pharmacyId: String): PharmacyDatabase = Room.databaseBuilder(
             context.applicationContext,
             PharmacyDatabase::class.java,
             "dictator_pharmacy_" + pharmacyId.replace("-", "") + ".db"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
             .build()
     }
 }

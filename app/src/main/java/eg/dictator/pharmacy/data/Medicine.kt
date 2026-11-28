@@ -1,5 +1,6 @@
 package eg.dictator.pharmacy.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -114,4 +115,38 @@ data class CustomerDebtWithDetails(
     @androidx.room.Embedded val debt: CustomerDebt,
     @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val items: List<DebtItem>,
     @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val payments: List<DebtPayment>
+)
+
+
+@Entity(
+    tableName = "sale_returns",
+    foreignKeys = [ForeignKey(entity = SaleItem::class, parentColumns = ["id"], childColumns = ["saleItemId"], onDelete = ForeignKey.RESTRICT)],
+    indices = [Index("saleItemId"), Index("createdAt")]
+)
+data class SaleReturn(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val saleItemId: Long,
+    val medicineId: Long,
+    val quantity: Int,
+    val refundAmount: Double,
+    val reason: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+
+@Entity(
+    tableName = "medicine_reference",
+    indices = [Index("commercialNameAr"), Index("scientificName"), Index("manufacturer")]
+)
+data class MedicineReference(
+    @PrimaryKey val id: Int,
+    val commercialNameEn: String,
+    val commercialNameAr: String,
+    val scientificName: String,
+    val manufacturer: String,
+    val drugClass: String,
+    val route: String,
+    val priceEgp: Double?,
+    val barcode: String? = null,
+    @ColumnInfo(defaultValue = "''") val uses: String = ""
 )

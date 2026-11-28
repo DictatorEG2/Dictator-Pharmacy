@@ -9,7 +9,26 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class MedicineDao {
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR category LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 100")
+
+    @Query("SELECT COUNT(*) FROM medicine_reference")
+    abstract suspend fun referenceCount(): Int
+
+    @Query("SELECT COUNT(*) FROM medicine_reference")
+    abstract fun observeReferenceCount(): Flow<Int>
+
+    @Query("DELETE FROM medicine_reference WHERE id > :lastId")
+    abstract suspend fun pruneMedicineReferences(lastId: Int)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun insertMedicineReferences(rows: List<MedicineReference>)
+
+    @Query("SELECT id, commercialNameEn, commercialNameAr, scientificName, manufacturer, drugClass, route, priceEgp, barcode, uses FROM medicine_reference ORDER BY commercialNameAr COLLATE NOCASE, commercialNameEn COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    abstract fun browseMedicineReference(limit: Int, offset: Int): Flow<List<MedicineReference>>
+
+    @Query("SELECT id, commercialNameEn, commercialNameAr, scientificName, manufacturer, drugClass, route, priceEgp, barcode, uses FROM medicine_reference WHERE LOWER(commercialNameEn) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(commercialNameAr),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(scientificName),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR LOWER(manufacturer) LIKE '%' || :query || '%' OR LOWER(COALESCE(barcode,'')) LIKE '%' || :query || '%' OR LOWER(uses) LIKE '%' || :query || '%' ORDER BY commercialNameAr COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    abstract fun searchMedicineReference(query: String, limit: Int = 20, offset: Int = 0): Flow<List<MedicineReference>>
+
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE LOWER(name) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR LOWER(category) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(category),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 200")
     abstract fun search(query: String): Flow<List<Medicine>>
 
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines ORDER BY name COLLATE NOCASE LIMIT 500")
@@ -56,6 +75,35 @@ abstract class MedicineDao {
     @Query("DELETE FROM sale_items WHERE saleId=:saleId")
     abstract suspend fun clearSaleItems(saleId: Long)
 
+
+
+    @Query("SELECT id, saleId, medicineId, medicineName, unitPrice, quantity, lineTotal FROM sale_items WHERE id = :id LIMIT 1")
+    abstract suspend fun saleItemById(id: Long): SaleItem?
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM sale_returns WHERE saleItemId = :saleItemId")
+    abstract suspend fun returnedQuantity(saleItemId: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertSaleReturn(record: SaleReturn)
+
+    @Transaction
+    open suspend fun recordSaleReturn(saleItemId: Long, quantity: Int, reason: String): Double {
+        require(quantity > 0) { "كمية المرتجع يجب أن تكون أكبر من صفر" }
+        require(reason.isNotBlank()) { "اكتب سبب المرتجع" }
+        val item = saleItemById(saleItemId) ?: error("الصنف غير موجود في الفاتورة")
+        val alreadyReturned = returnedQuantity(saleItemId)
+        require(quantity <= item.quantity - alreadyReturned) {
+            "الكمية المتبقية للإرجاع: ${(item.quantity - alreadyReturned).coerceAtLeast(0)}"
+        }
+        val medicine = medicineById(item.medicineId) ?: error("لا يمكن ربط الصنف بمخزون الصيدلية")
+        require(medicine.remoteId != null) { "الصنف غير مرتبط بمخزون الصيدلية السحابي" }
+        val now = System.currentTimeMillis()
+        val refund = item.unitPrice * quantity
+        check(updateQuantity(medicine.id, quantity, now) == 1) { "تعذر إعادة الكمية للمخزون" }
+        insertMovement(StockMovement(medicineId = medicine.id, delta = quantity, reason = "مرتجع فاتورة #${item.saleId}: ${reason.trim()}", createdAt = now))
+        insertSaleReturn(SaleReturn(saleItemId = item.id, medicineId = medicine.id, quantity = quantity, refundAmount = refund, reason = reason.trim(), createdAt = now))
+        return refund
+    }
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertDebt(debt: CustomerDebt): Long

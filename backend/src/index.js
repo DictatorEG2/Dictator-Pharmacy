@@ -436,9 +436,11 @@ async function salesApi(request, env, device, path) {
   const customerId = validOptionalText(input.customerId, 64);
   if (customerId && !/^[a-f0-9-]{36}$/i.test(customerId)) return json({ error: "invalid_customer_id" }, 400);
   const paid = input.paymentAmountMinor ?? 0, method = String(input.paymentMethod || "cash");
+  const discount = input.discountMinor ?? 0;
   if (!Number.isSafeInteger(paid) || paid < 0 || !["cash","card","transfer","other"].includes(method))
     return json({ error: "invalid_payment" }, 400);
-  const payloadHash = await hash(JSON.stringify({ customerId, items: lines, paymentAmountMinor: paid, paymentMethod: method }));
+  if (!Number.isSafeInteger(discount) || discount < 0) return json({ error: "invalid_discount" }, 400);
+  const payloadHash = await hash(JSON.stringify({ customerId, items: lines, paymentAmountMinor: paid, paymentMethod: method, discountMinor: discount }));
 
   const findOperation = () => env.DB.prepare("SELECT payload_hash,result_json FROM sync_operations WHERE pharmacy_id=? AND operation_id=?")
     .bind(device.pharmacy_id, operationId).first();
@@ -461,6 +463,9 @@ async function salesApi(request, env, device, path) {
     Object.assign(line, { name: med.name, unitPrice: med.sale_price_minor, lineTotal: amount });
     total += amount;
   }
+  const subtotal = total;
+  if (discount > subtotal) return json({ error: "discount_exceeds_sale_total" }, 400);
+  total = subtotal - discount;
   if (paid > total) return json({ error: "payment_exceeds_sale_total" }, 400);
   if (customerId) {
     const customer = await env.DB.prepare("SELECT id FROM customers WHERE id=? AND pharmacy_id=?")
@@ -489,7 +494,7 @@ async function salesApi(request, env, device, path) {
   if (!allocations.length || allocations.length > 40) return json({ error:"sale_allocation_limit_exceeded" },400);
 
   const saleId = crypto.randomUUID(), stamp = now(), expected = allocations.length;
-  const resultBody = { saleId,invoiceNumber:saleId,totalMinor:total,paidMinor:paid,dueMinor:total-paid,
+  const resultBody = { saleId,invoiceNumber:saleId,subtotalMinor:subtotal,discountMinor:discount,totalMinor:total,paidMinor:paid,dueMinor:total-paid,
     itemCount:lines.length,createdAt:stamp };
   const allocationIds = allocations.map(x => x.id), batchMarks = allocationIds.map(() => "?").join(",");
   const caseSql = "CASE id " + allocations.map(() => "WHEN ? THEN ?").join(" ") + " ELSE 0 END";
@@ -500,9 +505,9 @@ async function salesApi(request, env, device, path) {
       "AND (SELECT COUNT(*) FROM inventory_batches WHERE pharmacy_id=? AND id IN (" + batchMarks +
       ") AND quantity>=(" + caseSql + "))=?")
       .bind(...caseArgs,stamp,device.pharmacy_id,...allocationIds,...caseArgs,device.pharmacy_id,...allocationIds,...caseArgs,expected),
-    env.DB.prepare("INSERT INTO sales(id,pharmacy_id,device_id,customer_id,invoice_number,status,total_minor,created_at,updated_at) " +
-      "SELECT ?,?,?,?,?, 'completed',?,?,? WHERE changes()=?")
-      .bind(saleId,device.pharmacy_id,device.id,customerId,saleId,total,stamp,stamp,expected)
+    env.DB.prepare("INSERT INTO sales(id,pharmacy_id,device_id,customer_id,invoice_number,status,total_minor,discount_minor,created_at,updated_at) " +
+      "SELECT ?,?,?,?,?, 'completed',?,?,?,? WHERE changes()=?")
+      .bind(saleId,device.pharmacy_id,device.id,customerId,saleId,total,discount,stamp,stamp,expected)
   ];
 
   for (const a of allocations) {
@@ -523,7 +528,7 @@ async function salesApi(request, env, device, path) {
     .bind(device.pharmacy_id,operationId,payloadHash,JSON.stringify(resultBody),stamp,saleId,device.pharmacy_id));
   statements.push(env.DB.prepare("INSERT INTO audit_log(pharmacy_id,actor_device_id,action,target_id,created_at,details_json) " +
     "SELECT ?,?,'sale_created',?,?,? WHERE EXISTS(SELECT 1 FROM sales WHERE id=? AND pharmacy_id=?)")
-    .bind(device.pharmacy_id,device.id,saleId,stamp,JSON.stringify({totalMinor:total,paidMinor:paid,itemCount:lines.length}),saleId,device.pharmacy_id));
+    .bind(device.pharmacy_id,device.id,saleId,stamp,JSON.stringify({subtotalMinor:subtotal,discountMinor:discount,totalMinor:total,paidMinor:paid,itemCount:lines.length}),saleId,device.pharmacy_id));
 
   try {
     const results = await env.DB.batch(statements);

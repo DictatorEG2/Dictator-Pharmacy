@@ -1,8 +1,14 @@
 package eg.dictator.pharmacy
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,6 +20,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +52,11 @@ import eg.dictator.pharmacy.data.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+private fun normalizeMedicineQuery(value: String): String = value.lowercase()
+    .replace(Regex("[\\u064B-\\u065F\\u0670\\u0640]"), "")
+    .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ٱ', 'ا')
+    .replace('ى', 'ي').trim()
+
 private fun startOfDay(): Long {
     val calendar = java.util.Calendar.getInstance()
     calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -49,18 +66,19 @@ private fun startOfDay(): Long {
     return calendar.timeInMillis
 }
 
-private val Ink = Color(0xFF101116)
-private val Panel = Color(0xFF1A1C24)
-private val Crimson = Color(0xFF650D24)
-private val Blue = Color(0xFF183A66)
-private val Muted = Color(0xFF9BA1AE)
+private val Ink = Color(0xFFF4F2ED)
+private val Panel = Color(0xFFFFFFFF)
+private val Crimson = Color(0xFF183B4E)
+private val Blue = Color(0xFF2F6D68)
+private val Muted = Color(0xFF687780)
+private val Champagne = Color(0xFFC5A46D)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             var session by remember { mutableStateOf(SecureSessionStore.read(this)) }
-            MaterialTheme(colorScheme = darkColorScheme(primary = Crimson, secondary = Blue, background = Ink, surface = Panel)) {
+            MaterialTheme(colorScheme = lightColorScheme(primary = Crimson, secondary = Blue, background = Ink, surface = Panel)) {
                 if (session == null) {
                     PharmacyOnboardingScreen(onRegistered = { created -> session = created })
                 } else {
@@ -72,6 +90,7 @@ class MainActivity : ComponentActivity() {
                         key = "pharmacy_${current.pharmacyId}",
                         factory = PharmacyViewModel.factory(dao, current)
                     )
+                    LaunchedEffect(current.pharmacyId) { MedicineReferenceImporter.ensureImported(this@MainActivity, dao) }
                     PharmacyScreen(vm, current)
                 }
             }
@@ -98,18 +117,18 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("DICTATOR", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
+            Text("DICTATOR", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
             Text("PHARMACY", color = Color(0xFFB9C5D8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Divider(color = Crimson)
-            Text("ابدأ بإعداد صيدليتك", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("أنشئ مساحة مستقلة لصيدليتك. هذا الجهاز سيصبح جهاز المدير الأول، ويمكن إضافة الموظفين لاحقًا بدعوات.", color = Muted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { signInMode = false; joinMode = false; error = null }) { Text("إنشاء") }
-                TextButton(onClick = { signInMode = false; joinMode = true; error = null }) { Text("انضمام") }
-                TextButton(onClick = { signInMode = true; joinMode = false; error = null }) { Text("تسجيل الدخول") }
+            Text("اختر طريقة الدخول", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("مسار المدير لإنشاء الصيدلية، ومسار الموظف للانضمام بدعوة أو الدخول بجهاز تمت الموافقة عليه.", color = Muted)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { signInMode = false; joinMode = false; deviceName = "جهاز المدير"; error = null }, modifier = Modifier.fillMaxWidth()) { Text("مدير الصيدلية • إنشاء صيدلية") }
+                OutlinedButton(onClick = { signInMode = false; joinMode = true; deviceName = "جهاز موظف"; error = null }, modifier = Modifier.fillMaxWidth()) { Text("موظف • الانضمام بكود دعوة") }
+                OutlinedButton(onClick = { signInMode = true; joinMode = false; error = null }, modifier = Modifier.fillMaxWidth()) { Text("مدير أو موظف • دخول جهاز معتمد") }
             }
             if (signInMode) {
-                Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("دخول جهاز تمت الموافقة عليه من مدير الصيدلية", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = deviceToken, onValueChange = { deviceToken = it.trim(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دخول الجهاز") },
@@ -144,11 +163,11 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = Crimson)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
                     else Text("تسجيل الدخول")
                 }
             } else if (joinMode) {
-                Text("الانضمام إلى صيدلية موجودة", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("انضمام الموظف إلى صيدلية موجودة", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = inviteCode, onValueChange = { inviteCode = it.filter { ch -> ch.isLetterOrDigit() }.take(16).uppercase(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دعوة المدير") },
@@ -179,7 +198,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading && inviteCode.length == 16 && deviceName.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
                     else Text("إرسال طلب الانضمام")
                 }
                 Text("بعد موافقة المدير، سيعطيك رمز دخول خاص بهذا الجهاز.", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -225,8 +244,8 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = Crimson)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-                    else Text("إنشاء الصيدلية")
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
+                    else Text("إنشاء الصيدلية كمدير")
                 }
                 Text("بإنشاء الصيدلية يصبح هذا الجهاز مديرًا. لا تشارك رمز الجهاز مع أي شخص.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
@@ -261,6 +280,7 @@ class PharmacyViewModel(
                             quantity = item.quantity,
                             minimumQuantity = item.lowStockThreshold,
                             barcode = item.barcode,
+                            imageUri = old?.imageUri,
                             updatedAt = System.currentTimeMillis(),
                             remoteId = item.id
                         )
@@ -343,7 +363,22 @@ class PharmacyViewModel(
         }
     }
     val searchText = MutableStateFlow("")
-    val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
+    private val referencePage = MutableStateFlow(0)
+    fun setSearchText(value: String) {
+        referencePage.value = 0
+        searchText.value = value
+    }
+    fun loadMoreReferenceMedicines() { referencePage.value += 1 }
+    val referenceMedicines = combine(searchText, referencePage) { query, page -> query to page }
+        .flatMapLatest { (query, page) ->
+            val normalized = normalizeMedicineQuery(query)
+            if (normalized.isBlank()) dao.browseMedicineReference(limit = 20, offset = page * 20)
+            else dao.searchMedicineReference(normalized, limit = 20, offset = page * 20)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val referenceMedicineCount = dao.observeReferenceCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val referencePageIndex = referencePage.asStateFlow()
+    val medicines = searchText.flatMapLatest { dao.search(normalizeMedicineQuery(it)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -435,7 +470,7 @@ class PharmacyViewModel(
     }
 
     fun addMedicine(
-        name: String, category: String, price: Double, quantity: Int,
+        name: String, category: String, price: Double, quantity: Int, imageUri: String?,
         done: (Result<Unit>) -> Unit
     ) {
         viewModelScope.launch {
@@ -453,6 +488,7 @@ class PharmacyViewModel(
                     Medicine(
                         name = name.trim(), category = category.trim(),
                         sellingPrice = price, quantity = quantity,
+                        imageUri = imageUri,
                         remoteId = remoteId
                     )
                 )
@@ -481,21 +517,25 @@ class PharmacyViewModel(
 
     private val pendingSaleOperations = mutableMapOf<String, String>()
 
-    fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<String>) -> Unit) {
+    fun completeSale(lines: List<SaleLineRequest>, discountPercent: Double, onResult: (Result<String>) -> Unit) {
         viewModelScope.launch {
             try {
                 val operationKey = lines.sortedBy { it.medicineId }
-                    .joinToString("|") { "${it.medicineId}:${it.quantity}" }
+                    .joinToString("|") { "${it.medicineId}:${it.quantity}" } + "|discount:" + discountPercent
                 val operationId = pendingSaleOperations.getOrPut(operationKey) {
                     java.util.UUID.randomUUID().toString()
                 }
-                val remoteLines = lines.map { line ->
+                require(discountPercent.isFinite() && discountPercent >= 0.0 && discountPercent <= 100.0) { "نسبة الخصم يجب أن تكون بين 0 و100" }
+                val selected = lines.map { line ->
                     val medicine = dao.medicineById(line.medicineId) ?: error("أحد الأصناف لم يعد موجودًا")
                     val remoteId = medicine.remoteId ?: error("هذا الصنف محلي وغير مرتبط بمخزون الصيدلية السحابي")
-                    remoteId to line.quantity
+                    Triple(remoteId, line.quantity, medicine.sellingPrice)
                 }
+                val remoteLines = selected.map { it.first to it.second }
+                val subtotalMinor = selected.sumOf { (_, quantity, price) -> kotlin.math.round(price * 100.0 * quantity).toLong() }
+                val discountMinor = kotlin.math.round(subtotalMinor * discountPercent / 100.0).toLong()
                 val response = withContext(Dispatchers.IO) {
-                    PharmacyDataApi.createSale(session.token, operationId, remoteLines)
+                    PharmacyDataApi.createSale(session.token, operationId, remoteLines, discountMinor = discountMinor)
                 }
                 pendingSaleOperations.remove(operationKey)
                 refreshCloudCatalog()
@@ -504,6 +544,22 @@ class PharmacyViewModel(
         }
     }
 
+    fun returnSaleItem(saleItemId: Long, quantity: Int, reason: String, done: (Result<Double>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                require(quantity > 0) { "أدخل كمية صحيحة" }
+                val item = dao.saleItemById(saleItemId) ?: error("الصنف غير موجود في الفاتورة")
+                val alreadyReturned = dao.returnedQuantity(saleItemId)
+                require(quantity <= item.quantity - alreadyReturned) { "الكمية المتبقية للإرجاع: " + (item.quantity - alreadyReturned).coerceAtLeast(0) }
+                val medicine = dao.medicineById(item.medicineId) ?: error("الدواء غير موجود في المخزون المحلي")
+                val remoteId = medicine.remoteId ?: error("الدواء غير مرتبط بمخزون الصيدلية")
+                withContext(Dispatchers.IO) { PharmacyDataApi.adjustStock(session.token, remoteId, quantity, "مرتجع فاتورة #" + item.saleId + ": " + reason.trim()) }
+                val refund = dao.recordSaleReturn(saleItemId, quantity, reason)
+                refreshCloudCatalog()
+                done(Result.success(refund))
+            } catch (error: Exception) { done(Result.failure(error)) }
+        }
+    }
     companion object {
         fun factory(dao: MedicineDao, session: SecureSessionStore.Session) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -518,11 +574,16 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     var showAdd by remember { mutableStateOf(false) }
     var showSale by remember { mutableStateOf(false) }
     var showReports by remember { mutableStateOf(false) }
+    var showReturns by remember { mutableStateOf(false) }
     var showDebts by remember { mutableStateOf(false) }
     var showManager by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
+    var selectedReference by remember { mutableStateOf<MedicineReference?>(null) }
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
+    val referenceMedicines by vm.referenceMedicines.collectAsState()
+    val referenceMedicineCount by vm.referenceMedicineCount.collectAsState()
+    val referencePageIndex by vm.referencePageIndex.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
     val recentSales by vm.recentSales.collectAsState()
@@ -531,22 +592,99 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     val reportRevenue by vm.reportRevenue.collectAsState()
     val reportCount by vm.reportCount.collectAsState()
     val reportTopSelling by vm.reportTopSelling.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val visibleMedicines = when (selectedTab) {
+    var stockFilterTab by remember { mutableIntStateOf(0) }
+    var activeNav by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val updateScope = rememberCoroutineScope()
+    var availableRelease by remember { mutableStateOf<AppRelease?>(null) }
+    var downloadedUpdate by remember { mutableStateOf<java.io.File?>(null) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf("الإصدار الحالي: " + BuildConfig.VERSION_NAME) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
+    // Check GitHub Releases automatically whenever a pharmacy session opens.
+    // Android still requires the user to confirm installation through its package installer.
+    LaunchedEffect(session.pharmacyId) {
+        updateBusy = true
+        try {
+            val found = withContext(Dispatchers.IO) { AppUpdater.checkForUpdate() }
+            availableRelease = found
+            if (found != null) {
+                updateMessage = "يتوفر تحديث جديد: " + found.tag
+                showUpdateDialog = true
+            } else {
+                updateMessage = "أنت تستخدم أحدث إصدار متاح (" + BuildConfig.VERSION_NAME + ")."
+            }
+        } catch (error: Exception) {
+            updateMessage = error.message ?: "تعذر فحص التحديث تلقائيًا. يمكنك إعادة المحاولة من قسم المزيد."
+        } finally {
+            updateBusy = false
+        }
+    }
+
+    if (showUpdateDialog && availableRelease != null) {
+        val release = availableRelease!!
+        AlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            title = { Text("تحديث جديد متاح") },
+            text = {
+                Text("يتوفر الإصدار ${release.tag}. سيتم تنزيله ثم فتح مثبت Android لتأكيد التحديث، مع الاحتفاظ ببيانات الصيدلية.")
+            },
+            confirmButton = {
+                TextButton(enabled = !updateBusy, onClick = {
+                    showUpdateDialog = false
+                    updateBusy = true
+                    updateMessage = "جارٍ تنزيل الإصدار " + release.tag + "..."
+                    updateScope.launch {
+                        try {
+                            val file = withContext(Dispatchers.IO) { AppUpdater.downloadRelease(context, release) }
+                            downloadedUpdate = file
+                            val opened = AppUpdater.installOrRequestPermission(context, file)
+                            updateMessage = if (opened) "تم فتح مثبت Android. أكّد التثبيت لإكمال التحديث." else "اسمح بالتثبيت من هذا المصدر، ثم ارجع إلى قسم المزيد واضغط تثبيت التحديث."
+                        } catch (error: Exception) {
+                            updateMessage = error.message ?: "تعذر تنزيل التحديث."
+                        } finally {
+                            updateBusy = false
+                        }
+                    }
+                }) { Text("تنزيل التحديث") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdateDialog = false }) { Text("لاحقًا") }
+            }
+        )
+    }
+    val visibleMedicines = when (stockFilterTab) {
         1 -> lowStock
         2 -> outOfStock
         else -> medicines
-    }.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) || it.category.contains(search, ignoreCase = true) }
+    }.filter { search.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(search)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(search)) }
 
     Scaffold(
         containerColor = Ink,
+        bottomBar = {
+            NavigationBar(containerColor = Panel, contentColor = Crimson) {
+                NavigationBarItem(selected = activeNav == 0, onClick = { activeNav = 0; stockFilterTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("الرئيسية") })
+                NavigationBarItem(selected = activeNav == 1, onClick = { activeNav = 1; stockFilterTab = 0 }, icon = { Icon(Icons.Default.Medication, null) }, label = { Text("الأدوية") })
+                NavigationBarItem(selected = activeNav == 2, onClick = { activeNav = 2; showSale = true }, icon = { Icon(Icons.Default.PointOfSale, null) }, label = { Text("المبيعات") })
+                NavigationBarItem(selected = activeNav == 3, onClick = { activeNav = 3; stockFilterTab = 1 }, icon = { Icon(Icons.Default.Inventory2, null) }, label = { Text("المخزون") })
+                NavigationBarItem(selected = activeNav == 4, onClick = { activeNav = 4; showDebts = true }, icon = { Icon(Icons.Default.MoreHoriz, null) }, label = { Text("المزيد") })
+            }
+        },
         topBar = {
-            Column(Modifier.fillMaxWidth().background(Panel).padding(18.dp)) {
-                Text("DICTATOR", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                Text("PHARMACY MANAGEMENT SYSTEM", color = Muted, style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.height(8.dp))
-                Text("إدارة الصيدلية", color = Color.White)
-                Text("تتم مزامنة الأدوية والمخزون والمبيعات والمديونيات مع الأجهزة المعتمدة عند توفر الإنترنت.", color = Color(0xFF75C995), style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 18.dp, vertical = 14.dp)) {
+                Text("DICTATOR PHARMACY", color = Crimson, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text("إدارة دقيقة… وصيدلية أكثر كفاءة", color = Blue, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                Text("تطوير Dictator_EG@", color = Muted, style = MaterialTheme.typography.labelSmall)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("إدارة الصيدلية  •  ${session.pharmacyName}", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Dictator_channel2"))) }) {
+                        Icon(Icons.Default.Send, contentDescription = null, tint = Blue, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("قناة تيليجرام")
+                    }
+                }
+                Text("دليل الأدوية محفوظ محليًا ويعمل دون إنترنت. البيع وتعديل المخزون والمديونيات تتطلب الاتصال بالخادم حاليًا.", color = Blue, style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButton = {
@@ -557,70 +695,129 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it; vm.searchText.value = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("ابحث باسم الدواء أو جزء منه") },
-                singleLine = true
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
-            Spacer(Modifier.height(8.dp))
-            if (session.role == "manager") {
-                OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
-            Spacer(Modifier.height(8.dp))
-            if (session.role == "manager") {
-                Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
-                SummaryTile("مخزون منخفض", lowStock.size.toString(), Modifier.weight(1f))
-                SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(12.dp))
-            TabRow(selectedTabIndex = selectedTab, containerColor = Panel, contentColor = Color.White) {
-                listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label ->
-                    Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(label) })
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) {
+            when (activeNav) {
+                0 -> {
+                    Text("أهلاً بك في " + session.pharmacyName, color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("ملخص سريع لإدارة الصيدلية", color = Muted)
+                    Button(onClick = { showSale = true; activeNav = 2 }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
+                    OutlinedButton(onClick = { showDebts = true; activeNav = 4 }, modifier = Modifier.fillMaxWidth()) { Text("فتح مديونيات العملاء") }
+                    if (session.role == "manager") { OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }; Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") } }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SummaryTile("أدوية المخزون", allMedicines.size.toString(), Modifier.weight(1f)); SummaryTile("مخزون منخفض", lowStock.size.toString(), Modifier.weight(1f)); SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f)) }
+                    Text("قائمة الأدوية موجودة في قسم الأدوية أسفل الشاشة.", color = Muted)
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-            if (visibleMedicines.isEmpty()) {
-                Text(when (selectedTab) {
-                    1 -> "لا توجد أصناف منخفضة المخزون."
-                    2 -> "لا توجد أصناف نفد مخزونها."
-                    else -> "لا توجد أدوية مطابقة. اضغط + لإضافة دواء."
-                }, color = Muted)
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(visibleMedicines, key = { it.id }) { medicine ->
-                        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(medicine.name, color = Color.White, fontWeight = FontWeight.Bold)
-                                        Text(medicine.category, color = Muted)
-                                        Text("السعر: " + medicine.sellingPrice + " ج.م", color = Color.White)
-                                    }
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(medicine.quantity.toString(), color = Color.White, style = MaterialTheme.typography.headlineSmall)
-                                        Text("عبوة", color = Muted)
+                1 -> {
+                    Text("دليل الأدوية المصري", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(if (referenceMedicineCount > 0) "$referenceMedicineCount دواء مسجل في الدليل • اعرض وأضف لمخزونك" else "جارٍ تجهيز قاعدة بيانات الأدوية...", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(value = search, onValueChange = { search = it; vm.setSearchText(it) }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم الدواء بالعربي أو English أو المادة الفعالة أو الباركود") }, singleLine = true)
+                    if (referenceMedicineCount == 0) {
+                        Text("يتم تحميل دليل الأدوية أول مرة. تأكد من اتصال الإنترنت إذا لم تظهر القائمة.", color = Muted)
+                    } else if (referenceMedicines.isEmpty()) {
+                        Text(if (search.isBlank()) "جارٍ تحميل الأدوية..." else "لا توجد نتائج مطابقة. جرّب الاسم التجاري أو المادة الفعالة.", color = Muted)
+                    }
+                    referenceMedicines.forEach { reference ->
+                        val normalizedAr = normalizeMedicineQuery(reference.commercialNameAr)
+                        val normalizedEn = normalizeMedicineQuery(reference.commercialNameEn)
+                        val normalizedCombined = normalizeMedicineQuery(
+                            reference.commercialNameAr + " / " + reference.commercialNameEn
+                        )
+                        val normalizedWithoutSeparator = normalizeMedicineQuery(
+                            reference.commercialNameAr + " " + reference.commercialNameEn
+                        )
+                        val existingMedicine = allMedicines.firstOrNull {
+                            val savedName = normalizeMedicineQuery(it.name)
+                            savedName == normalizedAr ||
+                                savedName == normalizedEn ||
+                                savedName == normalizedCombined ||
+                                savedName == normalizedWithoutSeparator
+                        }
+                        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (existingMedicine?.imageUri?.isNotBlank() == true) {
+                                    AsyncImage(model = existingMedicine.imageUri, contentDescription = reference.commercialNameAr, modifier = Modifier.size(68.dp), contentScale = ContentScale.Crop)
+                                } else {
+                                    Surface(modifier = Modifier.size(68.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Medication, contentDescription = "صورة العبوة غير متاحة في مصدر البيانات", tint = Crimson, modifier = Modifier.size(32.dp))
+                                        }
                                     }
                                 }
-                                Spacer(Modifier.height(8.dp))
-                                if (session.role == "manager") {
-                                    Button(
-                                        onClick = { selected = medicine },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Crimson)
-                                    ) { Text("تعديل الكمية") }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                                    Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    if (reference.scientificName.isNotBlank()) Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                                    Text(reference.manufacturer, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    Text("السعر المرجعي: " + (reference.priceEgp?.let { "%.2f ج.م".format(it) } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelMedium)
+                                    if (reference.drugClass.isNotBlank()) Text(reference.drugClass.replace('.', ' '), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    if (reference.uses.isNotBlank()) Text(reference.uses, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                                    if (existingMedicine != null) Text("في مخزون الصيدلية: " + existingMedicine.quantity, color = Blue, style = MaterialTheme.typography.labelSmall)
                                 }
-                                if (medicine.quantity == 0) Text("نفد المخزون", color = Color(0xFFFF7777))
-                                else if (medicine.quantity <= medicine.minimumQuantity) Text("مخزون منخفض", color = Color(0xFFFFC36B))
+                                if (existingMedicine == null && session.role == "manager") {
+                                    TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة للمخزون") }
+                                }
+                            }
+                        }
+                    }
+                    if (referenceMedicines.size == 20 * (referencePageIndex + 1)) {
+                        OutlinedButton(onClick = { vm.loadMoreReferenceMedicines() }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (search.isBlank()) "عرض 20 دواء آخر" else "عرض 20 نتيجة أخرى")
+                        }
+                    }
+                    Text("صور العبوات ليست ضمن مصدر البيانات؛ أضف صورة حقيقية عند تسجيل الصنف.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mahmoudfalous/eg-drugs"))) }) {
+                        Text("مصدر دليل الأدوية: Egyptian Drug Database • CC BY 4.0")
+                    }
+                }
+                2 -> { Text("المبيعات", color = Crimson, fontWeight = FontWeight.Bold); Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth()) { Text("عملية بيع جديدة") }; if (session.role == "manager") OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("الفواتير والتقارير") } }
+                3 -> { Text("المخزون", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label -> FilterChip(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, label = { Text(label) }) } }; val stockRows = when (stockFilterTab) { 1 -> lowStock; 2 -> outOfStock; else -> allMedicines }; if (stockRows.isEmpty()) Text("لا توجد أصناف في هذا القسم.", color = Muted) else MedicineStockList(stockRows, session.role == "manager") { selected = it } }
+                else -> {
+                    Text("المزيد", color = Crimson, fontWeight = FontWeight.Bold)
+                    OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
+                    if (session.role == "manager") {
+                        OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("التقارير والفواتير") }
+                        OutlinedButton(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth()) { Text("إدارة الأجهزة ولوحة المدير") }
+                    }
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Text("تحديث التطبيق", color = Color(0xFF172B36), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text("نزّل آخر إصدار وثبّته مباشرة دون حذف التطبيق أو بيانات الصيدلية.", color = Muted)
+                            Text(updateMessage, color = Blue, style = MaterialTheme.typography.bodySmall)
+                            Button(enabled = !updateBusy, modifier = Modifier.fillMaxWidth(), onClick = {
+                                updateBusy = true
+                                updateMessage = "جارٍ التحقق من GitHub Releases..."
+                                updateScope.launch {
+                                    try {
+                                        val found = withContext(Dispatchers.IO) { AppUpdater.checkForUpdate() }
+                                        availableRelease = found
+                                        downloadedUpdate = null
+                                        updateMessage = if (found == null) "أنت تستخدم أحدث إصدار متاح." else "يتوفر الإصدار " + found.tag + " — الحجم التقريبي " + if (found.apkSize > 0) "%.1f MB".format(found.apkSize / 1048576.0) else "غير معروف"
+                                    } catch (error: Exception) { updateMessage = error.message ?: "تعذر التحقق من التحديث." }
+                                    finally { updateBusy = false }
+                                }
+                            }) { Text(if (updateBusy) "جارٍ التحقق..." else "التحقق من وجود تحديث") }
+                            availableRelease?.let { release ->
+                                Button(enabled = !updateBusy, modifier = Modifier.fillMaxWidth(), onClick = {
+                                    updateBusy = true
+                                    updateMessage = "جارٍ تنزيل الإصدار " + release.tag + "..."
+                                    updateScope.launch {
+                                        try {
+                                            val file = withContext(Dispatchers.IO) { AppUpdater.downloadRelease(context, release) }
+                                            downloadedUpdate = file
+                                            val opened = AppUpdater.installOrRequestPermission(context, file)
+                                            updateMessage = if (opened) "تم فتح مثبت Android. أكّد التثبيت لإكمال التحديث." else "اسمح بالتثبيت من هذا المصدر، ثم ارجع واضغط تثبيت التحديث."
+                                        } catch (error: Exception) { updateMessage = error.message ?: "تعذر تنزيل التحديث." }
+                                        finally { updateBusy = false }
+                                    }
+                                }) { Text(if (updateBusy) "جارٍ التنزيل..." else "تنزيل وتثبيت " + release.tag) }
+                            }
+                            downloadedUpdate?.let { file ->
+                                OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
+                                    try {
+                                        val opened = AppUpdater.installOrRequestPermission(context, file)
+                                        updateMessage = if (opened) "أكّد التثبيت في شاشة Android." else "فعّل إذن التثبيت ثم ارجع واضغط هذا الزر مرة أخرى."
+                                    } catch (error: Exception) { updateMessage = error.message ?: "تعذر فتح مثبت Android." }
+                                }) { Text("تثبيت التحديث الذي تم تنزيله") }
                             }
                         }
                     }
@@ -651,19 +848,28 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         salesCount = reportCount,
         topSelling = reportTopSelling,
         onRangeChanged = vm::setReportRange,
+        onReturn = { showReturns = true },
         onDismiss = { showReports = false }
     )
 
+    if (showReturns && session.role == "manager") SaleReturnsDialog(
+        sales = recentSales,
+        onReturn = { saleItemId, quantity, reason, done -> vm.returnSaleItem(saleItemId, quantity, reason, done) },
+        onDismiss = { showReturns = false }
+    )
     if (showSale) SaleDialog(
         medicines = allMedicines,
         onDismiss = { showSale = false },
-        onComplete = { lines, callback -> vm.completeSale(lines, callback) }
+        onComplete = { lines, discountPercent, callback -> vm.completeSale(lines, discountPercent, callback) }
     )
 
     if (showAdd && session.role == "manager") AddMedicineDialog(
-        onDismiss = { showAdd = false },
-        onSave = { name, category, price, quantity, done ->
-            vm.addMedicine(name, category, price, quantity, done)
+        initialName = selectedReference?.let { if (it.commercialNameAr.isNotBlank() && it.commercialNameEn.isNotBlank()) it.commercialNameAr + " / " + it.commercialNameEn else it.commercialNameAr.ifBlank { it.commercialNameEn } } ?: "",
+        initialCategory = selectedReference?.drugClass ?: "",
+        initialPrice = selectedReference?.priceEgp?.toString() ?: "",
+        onDismiss = { showAdd = false; selectedReference = null },
+        onSave = { name, category, price, quantity, imageUri, done ->
+            vm.addMedicine(name, category, price, quantity, imageUri, done)
         }
     )
 
@@ -682,10 +888,31 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
 }
 
 @Composable
+private fun MedicineStockList(medicines: List<Medicine>, canAdjust: Boolean, onAdjust: (Medicine) -> Unit) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
+        items(medicines, key = { it.id }) { medicine ->
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!medicine.imageUri.isNullOrBlank()) AsyncImage(model = medicine.imageUri, contentDescription = medicine.name, modifier = Modifier.size(62.dp), contentScale = ContentScale.Crop)
+                    else Surface(modifier = Modifier.size(62.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = "لا توجد صورة مضافة", tint = Crimson, modifier = Modifier.size(30.dp)) } }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                        Text("القسم: " + medicine.category, color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Text("السعر: %.2f ج.م • المتاح: %d".format(medicine.sellingPrice, medicine.quantity), color = Blue, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (canAdjust) IconButton(onClick = { onAdjust(medicine) }) { Icon(Icons.Default.Inventory2, contentDescription = "تعديل المخزون", tint = Crimson) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SummaryTile(label: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(value, color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -693,13 +920,24 @@ private fun SummaryTile(label: String, value: String, modifier: Modifier = Modif
 
 @Composable
 private fun AddMedicineDialog(
+    initialName: String = "",
+    initialCategory: String = "",
+    initialPrice: String = "",
     onDismiss: () -> Unit,
-    onSave: (String, String, Double, Int, (Result<Unit>) -> Unit) -> Unit
+    onSave: (String, String, Double, Int, String?, (Result<Unit>) -> Unit) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var category by remember { mutableStateOf(initialCategory) }
+    var price by remember { mutableStateOf(initialPrice) }
     var quantity by remember { mutableStateOf("0") }
+    var imageUri by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            imageUri = uri.toString()
+        }
+    }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -712,6 +950,11 @@ private fun AddMedicineDialog(
                 OutlinedTextField(category, { category = it; error = null }, label = { Text("القسم") }, enabled = !saving)
                 OutlinedTextField(price, { price = it; error = null }, label = { Text("سعر البيع") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), enabled = !saving)
                 OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit); error = null }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !saving)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (imageUri != null) AsyncImage(model = imageUri, contentDescription = "صورة الدواء", modifier = Modifier.size(64.dp), contentScale = ContentScale.Crop)
+                    OutlinedButton(enabled = !saving, onClick = { imagePicker.launch(arrayOf("image/*")) }) { Text(if (imageUri == null) "إضافة صورة الدواء" else "تغيير الصورة") }
+                }
+                Text("الصورة المختارة تُحفظ على هذا الجهاز فقط حاليًا.", color = Muted, style = MaterialTheme.typography.labelSmall)
                 error?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
@@ -723,7 +966,7 @@ private fun AddMedicineDialog(
                     error = "راجع اسم الدواء والقسم والسعر والكمية"
                 } else {
                     saving = true
-                    onSave(name, category, p, q) { result ->
+                    onSave(name, category, p, q, imageUri) { result ->
                         saving = false
                         result.onSuccess { onDismiss() }
                             .onFailure { error = it.message ?: "تعذر حفظ الدواء على الخادم" }
@@ -782,17 +1025,21 @@ private fun AdjustStockDialog(
 private fun SaleDialog(
     medicines: List<Medicine>,
     onDismiss: () -> Unit,
-    onComplete: (List<SaleLineRequest>, (Result<String>) -> Unit) -> Unit
+    onComplete: (List<SaleLineRequest>, Double, (Result<String>) -> Unit) -> Unit
 ) {
     val cart = remember { mutableStateMapOf<Long, Int>() }
     var query by remember { mutableStateOf("") }
+    var discountText by remember { mutableStateOf("0") }
     var saving by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val filtered = medicines.filter {
         it.quantity > 0 && (query.isBlank() || it.name.contains(query, ignoreCase = true) || it.category.contains(query, ignoreCase = true))
     }
     val cartMedicines = medicines.filter { (cart[it.id] ?: 0) > 0 }
-    val total = cartMedicines.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+    val subtotal = cartMedicines.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+    val discountPercent = discountText.toDoubleOrNull()?.takeIf { it >= 0.0 && it <= 100.0 } ?: 0.0
+    val discountAmount = subtotal * discountPercent / 100.0
+    val total = subtotal - discountAmount
 
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -810,14 +1057,14 @@ private fun SaleDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(medicine.name, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold)
                             Text("${medicine.sellingPrice} ج.م • المتاح ${medicine.quantity}", color = Muted)
                         }
                         TextButton(onClick = {
                             val current = cart[medicine.id] ?: 0
                             if (current < medicine.quantity) cart[medicine.id] = current + 1
                         }) { Text("+") }
-                        Text((cart[medicine.id] ?: 0).toString(), color = Color.White)
+                        Text((cart[medicine.id] ?: 0).toString(), color = Color(0xFF172B36))
                         TextButton(onClick = {
                             val current = cart[medicine.id] ?: 0
                             if (current <= 1) cart.remove(medicine.id) else cart[medicine.id] = current - 1
@@ -833,15 +1080,19 @@ private fun SaleDialog(
                         Text("${cart[medicine.id]} × ${medicine.sellingPrice} ج.م")
                     }
                 }
-                Text("الإجمالي: %.2f ج.م".format(total), color = Color.White, fontWeight = FontWeight.Bold)
+                OutlinedTextField(discountText, { discountText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("خصم بالنسبة المئوية %") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                if (discountText.toDoubleOrNull() == null || discountText.toDouble() < 0.0 || discountText.toDouble() > 100.0) Text("أدخل نسبة من 0 إلى 100", color = Color(0xFFB3261E))
+                Text("قبل الخصم: %.2f ج.م".format(subtotal), color = Muted)
+                Text("قيمة الخصم: %.2f ج.م".format(discountAmount), color = Blue)
+                Text("الإجمالي بعد الخصم: %.2f ج.م".format(total), color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 message?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
         confirmButton = {
-            TextButton(enabled = cart.isNotEmpty() && !saving, onClick = {
+            TextButton(enabled = cart.isNotEmpty() && !saving && discountText.toDoubleOrNull()?.let { it >= 0.0 && it <= 100.0 } == true, onClick = {
                 saving = true
                 val lines = cart.map { SaleLineRequest(it.key, it.value) }
-                onComplete(lines) { result ->
+                onComplete(lines, discountPercent) { result ->
                     saving = false
                     result.onSuccess { saleId ->
                         message = "تم تسجيل الفاتورة #$saleId"
@@ -865,6 +1116,7 @@ private fun SalesReportDialog(
     salesCount: Int,
     topSelling: List<TopSellingMedicine>,
     onRangeChanged: (Long, Long) -> Unit,
+    onReturn: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var period by remember { mutableIntStateOf(0) }
@@ -924,7 +1176,7 @@ private fun SalesReportDialog(
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text("إجمالي المبيعات", color = Muted)
-                        Text("%.2f ج.م".format(revenue), color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("%.2f ج.م".format(revenue), color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("عدد الفواتير: $salesCount", color = Muted)
                     }
                 }
@@ -940,7 +1192,10 @@ private fun SalesReportDialog(
                     }
                 }
                 Divider()
-                Text("آخر الفواتير", fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("آخر الفواتير", fontWeight = FontWeight.Bold)
+                    TextButton(onClick = onReturn) { Text("تسجيل مرتجع") }
+                }
                 if (sales.isEmpty()) Text("لا توجد فواتير مسجلة.", color = Muted)
                 sales.forEach { entry ->
                     Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
@@ -964,6 +1219,50 @@ private fun SalesReportDialog(
     )
 }
 
+@Composable
+private fun SaleReturnsDialog(
+    sales: List<SaleWithItems>,
+    onReturn: (Long, Int, String, (Result<Double>) -> Unit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val quantities = remember { mutableStateMapOf<Long, String>() }
+    val reasons = remember { mutableStateMapOf<Long, String>() }
+    var busyItem by remember { mutableStateOf<Long?>(null) }
+    var message by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("مرتجعات الفواتير") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("اختر الصنف من الفاتورة وحدد الكمية. سيُعاد المخزون بعد اعتماد العملية.", color = Muted)
+                if (sales.isEmpty()) Text("لا توجد فواتير محلية متاحة.", color = Muted)
+                sales.forEach { sale ->
+                    Text("فاتورة #" + sale.sale.id, fontWeight = FontWeight.Bold)
+                    sale.items.forEach { item ->
+                        Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(item.medicineName, fontWeight = FontWeight.SemiBold)
+                                Text("المباع: " + item.quantity + " • سعر الوحدة: " + "%.2f".format(item.unitPrice) + " ج.م", color = Muted)
+                                OutlinedTextField(value = quantities[item.id] ?: "1", onValueChange = { quantities[item.id] = it.filter(Char::isDigit).take(5) }, label = { Text("كمية المرتجع") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = busyItem == null)
+                                OutlinedTextField(value = reasons[item.id] ?: "استرجاع عميل", onValueChange = { reasons[item.id] = it }, label = { Text("سبب المرتجع") }, singleLine = true, enabled = busyItem == null)
+                                Button(onClick = {
+                                    val qty = quantities[item.id]?.toIntOrNull() ?: 0
+                                    busyItem = item.id
+                                    onReturn(item.id, qty, reasons[item.id] ?: "استرجاع عميل") { result ->
+                                        busyItem = null
+                                        message = result.fold({ "تم تسجيل المرتجع بقيمة " + "%.2f".format(it) + " ج.م وإعادة الكمية للمخزون. راجع تسوية المبلغ مع العميل." }, { it.message ?: "تعذر تسجيل المرتجع" })
+                                    }
+                                }, enabled = busyItem == null, modifier = Modifier.fillMaxWidth()) { Text(if (busyItem == item.id) "جارٍ التسجيل..." else "اعتماد المرتجع") }
+                            }
+                        }
+                    }
+                }
+                if (message.isNotBlank()) Text(message, color = Blue)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
+    )
+}
 @Composable
 private fun CustomerDebtsDialog(
     medicines: List<Medicine>, debts: List<CustomerDebtWithDetails>, paidDebts: List<CustomerDebtWithDetails>,
@@ -997,7 +1296,7 @@ private fun CustomerDebtsDialog(
                 val remaining = (d.totalAmount - d.paidAmount).coerceAtLeast(0.0)
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(d.customerName, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(d.customerName, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text("الإجمالي: %.2f • المدفوع: %.2f ج.م".format(d.totalAmount, d.paidAmount), color = Muted)
                         Text("المتبقي: %.2f ج.م".format(remaining), color = if (remaining > 0) Color(0xFFFFC36B) else Color(0xFF75C995), fontWeight = FontWeight.Bold)
                         entry.items.forEach { item -> Text("• ${item.medicineName} — ${item.quantity} × ${item.unitPrice}", color = Muted) }
@@ -1044,9 +1343,11 @@ private fun AddCustomerDebtDialog(
         Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم العميل") }, singleLine = true)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
-            medicines.filter { it.quantity > 0 && (query.isBlank() || it.name.contains(query, true)) }.take(60).forEach { m ->
+            val matchingMedicines = medicines.filter { it.quantity > 0 && (query.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(query)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(query))) }.take(100)
+            if (matchingMedicines.isEmpty()) Text("لا توجد أدوية متاحة بهذا الاسم في مخزون الصيدلية. أضف الدواء من قسم الأدوية أولًا.", color = Muted)
+            matchingMedicines.forEach { m ->
                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(8.dp)).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(m.name, color = Color.White); Text("%.2f ج.م".format(m.sellingPrice), color = Muted) }
+                    if (!m.imageUri.isNullOrBlank()) AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.size(48.dp), contentScale = ContentScale.Crop) else Surface(modifier = Modifier.size(48.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(8.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = null, tint = Crimson) } }; Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(m.name, color = Color(0xFF172B36)); Text("القسم: " + m.category, color = Muted); Text("%.2f ج.م • المتاح %d".format(m.sellingPrice, m.quantity), color = Muted) }
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n < m.quantity) cart[m.id] = n + 1 }) { Text("+") }
                     Text((cart[m.id] ?: 0).toString())
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n <= 1) cart.remove(m.id) else cart[m.id] = n - 1 }) { Text("−") }
@@ -1155,7 +1456,7 @@ private fun ManagerDashboardDialog(
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("مديونيات العملاء المفتوحة", color = Muted)
-                        Text("${activeDebts.size} مديونية", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("${activeDebts.size} مديونية", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text("إجمالي المتبقي: %.2f ج.م".format(debtBalance), color = Color(0xFFFFC36B))
                     }
                 }
@@ -1225,7 +1526,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("رمز دخول الجهاز بعد الموافقة — يظهر مرة واحدة", color = Color(0xFFFFC36B))
-                        Text(token, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        Text(token, color = Color(0xFF172B36), style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(token)) }) {
                             Text("نسخ رمز الجهاز")
                         }
@@ -1237,7 +1538,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("رمز الدعوة", color = Muted)
-                        Text(code, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(code, color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
                             Text("نسخ الرمز")
                         }
@@ -1253,7 +1554,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
             devices.forEach { device ->
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(device.name, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(device.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text(
                             when (device.status) {
                                 "pending" -> "بانتظار موافقة المدير"
