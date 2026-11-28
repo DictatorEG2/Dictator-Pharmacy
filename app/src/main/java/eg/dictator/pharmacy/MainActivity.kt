@@ -375,6 +375,9 @@ class PharmacyViewModel(
             if (normalized.isBlank()) dao.browseMedicineReference(limit = 20, offset = page * 20)
             else dao.searchMedicineReference(normalized, limit = 20, offset = page * 20)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val referenceMedicineCount = dao.observeReferenceCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val referencePageIndex = referencePage.asStateFlow()
     val medicines = searchText.flatMapLatest { dao.search(normalizeMedicineQuery(it)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
