@@ -5,6 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -447,7 +451,7 @@ class PharmacyViewModel(
     }
 
     fun addMedicine(
-        name: String, category: String, price: Double, quantity: Int,
+        name: String, category: String, price: Double, quantity: Int, imageUri: String?,
         done: (Result<Unit>) -> Unit
     ) {
         viewModelScope.launch {
@@ -465,6 +469,7 @@ class PharmacyViewModel(
                     Medicine(
                         name = name.trim(), category = category.trim(),
                         sellingPrice = price, quantity = quantity,
+                        imageUri = imageUri,
                         remoteId = remoteId
                     )
                 )
@@ -743,8 +748,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         initialCategory = selectedReference?.drugClass ?: "",
         initialPrice = selectedReference?.priceEgp?.toString() ?: "",
         onDismiss = { showAdd = false; selectedReference = null },
-        onSave = { name, category, price, quantity, done ->
-            vm.addMedicine(name, category, price, quantity, done)
+        onSave = { name, category, price, quantity, imageUri, done ->
+            vm.addMedicine(name, category, price, quantity, imageUri, done)
         }
     )
 
@@ -778,12 +783,20 @@ private fun AddMedicineDialog(
     initialCategory: String = "",
     initialPrice: String = "",
     onDismiss: () -> Unit,
-    onSave: (String, String, Double, Int, (Result<Unit>) -> Unit) -> Unit
+    onSave: (String, String, Double, Int, String?, (Result<Unit>) -> Unit) -> Unit
 ) {
     var name by remember { mutableStateOf(initialName) }
     var category by remember { mutableStateOf(initialCategory) }
     var price by remember { mutableStateOf(initialPrice) }
     var quantity by remember { mutableStateOf("0") }
+    var imageUri by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            imageUri = uri.toString()
+        }
+    }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -796,6 +809,10 @@ private fun AddMedicineDialog(
                 OutlinedTextField(category, { category = it; error = null }, label = { Text("القسم") }, enabled = !saving)
                 OutlinedTextField(price, { price = it; error = null }, label = { Text("سعر البيع") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), enabled = !saving)
                 OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit); error = null }, label = { Text("الكمية") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !saving)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (imageUri != null) AsyncImage(model = imageUri, contentDescription = "صورة الدواء", modifier = Modifier.size(64.dp), contentScale = ContentScale.Crop)
+                    OutlinedButton(enabled = !saving, onClick = { imagePicker.launch(arrayOf("image/*")) }) { Text(if (imageUri == null) "إضافة صورة الدواء" else "تغيير الصورة") }
+                }
                 error?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
@@ -807,7 +824,7 @@ private fun AddMedicineDialog(
                     error = "راجع اسم الدواء والقسم والسعر والكمية"
                 } else {
                     saving = true
-                    onSave(name, category, p, q) { result ->
+                    onSave(name, category, p, q, imageUri) { result ->
                         saving = false
                         result.onSuccess { onDismiss() }
                             .onFailure { error = it.message ?: "تعذر حفظ الدواء على الخادم" }
