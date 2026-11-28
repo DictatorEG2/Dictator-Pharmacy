@@ -513,6 +513,22 @@ class PharmacyViewModel(
         }
     }
 
+    fun returnSaleItem(saleItemId: Long, quantity: Int, reason: String, done: (Result<Double>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                require(quantity > 0) { "أدخل كمية صحيحة" }
+                val item = dao.saleItemById(saleItemId) ?: error("الصنف غير موجود في الفاتورة")
+                val alreadyReturned = dao.returnedQuantity(saleItemId)
+                require(quantity <= item.quantity - alreadyReturned) { "الكمية المتبقية للإرجاع: " + (item.quantity - alreadyReturned).coerceAtLeast(0) }
+                val medicine = dao.medicineById(item.medicineId) ?: error("الدواء غير موجود في المخزون المحلي")
+                val remoteId = medicine.remoteId ?: error("الدواء غير مرتبط بمخزون الصيدلية")
+                withContext(Dispatchers.IO) { PharmacyDataApi.adjustStock(session.token, remoteId, quantity, "مرتجع فاتورة #" + item.saleId + ": " + reason.trim()) }
+                val refund = dao.recordSaleReturn(saleItemId, quantity, reason)
+                refreshCloudCatalog()
+                done(Result.success(refund))
+            } catch (error: Exception) { done(Result.failure(error)) }
+        }
+    }
     companion object {
         fun factory(dao: MedicineDao, session: SecureSessionStore.Session) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -527,6 +543,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     var showAdd by remember { mutableStateOf(false) }
     var showSale by remember { mutableStateOf(false) }
     var showReports by remember { mutableStateOf(false) }
+    var showReturns by remember { mutableStateOf(false) }
     var showDebts by remember { mutableStateOf(false) }
     var showManager by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
@@ -678,9 +695,15 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         salesCount = reportCount,
         topSelling = reportTopSelling,
         onRangeChanged = vm::setReportRange,
+        onReturn = { showReturns = true },
         onDismiss = { showReports = false }
     )
 
+    if (showReturns && session.role == "manager") SaleReturnsDialog(
+        sales = recentSales,
+        onReturn = { saleItemId, quantity, reason, done -> vm.returnSaleItem(saleItemId, quantity, reason, done) },
+        onDismiss = { showReturns = false }
+    )
     if (showSale) SaleDialog(
         medicines = allMedicines,
         onDismiss = { showSale = false },
@@ -892,6 +915,7 @@ private fun SalesReportDialog(
     salesCount: Int,
     topSelling: List<TopSellingMedicine>,
     onRangeChanged: (Long, Long) -> Unit,
+    onReturn: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var period by remember { mutableIntStateOf(0) }
@@ -967,7 +991,10 @@ private fun SalesReportDialog(
                     }
                 }
                 Divider()
-                Text("آخر الفواتير", fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("آخر الفواتير", fontWeight = FontWeight.Bold)
+                    TextButton(onClick = onReturn) { Text("تسجيل مرتجع") }
+                }
                 if (sales.isEmpty()) Text("لا توجد فواتير مسجلة.", color = Muted)
                 sales.forEach { entry ->
                     Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
@@ -991,6 +1018,50 @@ private fun SalesReportDialog(
     )
 }
 
+@Composable
+private fun SaleReturnsDialog(
+    sales: List<SaleWithItems>,
+    onReturn: (Long, Int, String, (Result<Double>) -> Unit) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val quantities = remember { mutableStateMapOf<Long, String>() }
+    val reasons = remember { mutableStateMapOf<Long, String>() }
+    var busyItem by remember { mutableStateOf<Long?>(null) }
+    var message by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("مرتجعات الفواتير") },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("اختر الصنف من الفاتورة وحدد الكمية. سيُعاد المخزون بعد اعتماد العملية.", color = Muted)
+                if (sales.isEmpty()) Text("لا توجد فواتير محلية متاحة.", color = Muted)
+                sales.forEach { sale ->
+                    Text("فاتورة #" + sale.sale.id, fontWeight = FontWeight.Bold)
+                    sale.items.forEach { item ->
+                        Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(item.medicineName, fontWeight = FontWeight.SemiBold)
+                                Text("المباع: " + item.quantity + " • سعر الوحدة: " + "%.2f".format(item.unitPrice) + " ج.م", color = Muted)
+                                OutlinedTextField(value = quantities[item.id] ?: "1", onValueChange = { quantities[item.id] = it.filter(Char::isDigit).take(5) }, label = { Text("كمية المرتجع") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = busyItem == null)
+                                OutlinedTextField(value = reasons[item.id] ?: "استرجاع عميل", onValueChange = { reasons[item.id] = it }, label = { Text("سبب المرتجع") }, singleLine = true, enabled = busyItem == null)
+                                Button(onClick = {
+                                    val qty = quantities[item.id]?.toIntOrNull() ?: 0
+                                    busyItem = item.id
+                                    onReturn(item.id, qty, reasons[item.id] ?: "استرجاع عميل") { result ->
+                                        busyItem = null
+                                        message = result.fold({ "تم تسجيل المرتجع بقيمة " + "%.2f".format(it) + " ج.م وإعادة الكمية للمخزون. راجع تسوية المبلغ مع العميل." }, { it.message ?: "تعذر تسجيل المرتجع" })
+                                    }
+                                }, enabled = busyItem == null, modifier = Modifier.fillMaxWidth()) { Text(if (busyItem == item.id) "جارٍ التسجيل..." else "اعتماد المرتجع") }
+                            }
+                        }
+                    }
+                }
+                if (message.isNotBlank()) Text(message, color = Blue)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
+    )
+}
 @Composable
 private fun CustomerDebtsDialog(
     medicines: List<Medicine>, debts: List<CustomerDebtWithDetails>, paidDebts: List<CustomerDebtWithDetails>,
