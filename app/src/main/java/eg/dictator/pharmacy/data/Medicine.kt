@@ -131,3 +131,19 @@ data class SaleReturn(
     val reason: String,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+
+@Entity(
+    tableName = "medicine_reference",
+    indices = [Index("commercialNameAr"), Index("scientificName"), Index("manufacturer")]
+)
+data class MedicineReference(
+    @PrimaryKey val id: Int,
+    val commercialNameEn: String,
+    val commercialNameAr: String,
+    val scientificName: String,
+    val manufacturer: String,
+    val drugClass: String,
+    val route: String,
+    val priceEgp: Double?
+)
