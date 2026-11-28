@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
                         key = "pharmacy_${current.pharmacyId}",
                         factory = PharmacyViewModel.factory(dao, current)
                     )
+                    LaunchedEffect(current.pharmacyId) { MedicineReferenceImporter.ensureImported(this@MainActivity, dao) }
                     PharmacyScreen(vm, current)
                 }
             }
@@ -352,6 +353,8 @@ class PharmacyViewModel(
         }
     }
     val searchText = MutableStateFlow("")
+    val referenceMedicines = searchText.flatMapLatest { query -> if (query.trim().length < 2) flowOf(emptyList()) else dao.searchMedicineReference(query.trim()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -547,8 +550,10 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     var showDebts by remember { mutableStateOf(false) }
     var showManager by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Medicine?>(null) }
+    var selectedReference by remember { mutableStateOf<MedicineReference?>(null) }
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
+    val referenceMedicines by vm.referenceMedicines.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
     val recentSales by vm.recentSales.collectAsState()
@@ -606,9 +611,32 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 value = search,
                 onValueChange = { search = it; vm.searchText.value = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("ابحث باسم الدواء أو جزء منه") },
+                label = { Text("ابحث باسم الدواء أو المادة الفعالة") },
                 singleLine = true
             )
+            if (search.trim().length >= 2 && referenceMedicines.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("دليل الأدوية المصري • نتائج مرجعية", color = Crimson, fontWeight = FontWeight.Bold)
+                        referenceMedicines.take(6).forEach { reference ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold)
+                                    Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    Text("سعر مرجعي: " + (reference.priceEgp?.let { "%.2f".format(it) + " ج.م" } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelSmall)
+                                }
+                                if (session.role == "manager") {
+                                    TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة للصيدلية") }
+                                }
+                            }
+                            Divider(color = Color(0xFFE7E5DF))
+                        }
+                        Text("السعر المرجعي للاستدلال فقط؛ حدّد سعر البيع الفعلي عند الإضافة.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             Spacer(Modifier.height(12.dp))
             Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
             Spacer(Modifier.height(8.dp))
@@ -711,7 +739,10 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     )
 
     if (showAdd && session.role == "manager") AddMedicineDialog(
-        onDismiss = { showAdd = false },
+        initialName = selectedReference?.let { it.commercialNameAr.ifBlank { it.commercialNameEn } } ?: "",
+        initialCategory = selectedReference?.drugClass ?: "",
+        initialPrice = selectedReference?.priceEgp?.toString() ?: "",
+        onDismiss = { showAdd = false; selectedReference = null },
         onSave = { name, category, price, quantity, done ->
             vm.addMedicine(name, category, price, quantity, done)
         }
@@ -743,12 +774,15 @@ private fun SummaryTile(label: String, value: String, modifier: Modifier = Modif
 
 @Composable
 private fun AddMedicineDialog(
+    initialName: String = "",
+    initialCategory: String = "",
+    initialPrice: String = "",
     onDismiss: () -> Unit,
     onSave: (String, String, Double, Int, (Result<Unit>) -> Unit) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
+    var category by remember { mutableStateOf(initialCategory) }
+    var price by remember { mutableStateOf(initialPrice) }
     var quantity by remember { mutableStateOf("0") }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
