@@ -111,7 +111,7 @@ object PharmacyDataApi {
     fun createSale(
         token: String, operationId: String, items: List<Pair<String, Int>>,
         customerId: String? = null, paymentAmountMinor: Long = 0,
-        paymentMethod: String = "cash"
+        paymentMethod: String = "cash", discountMinor: Long = 0
     ): JSONObject {
         val rows = JSONArray()
         items.forEach { (medicineId, quantity) ->
@@ -119,6 +119,7 @@ object PharmacyDataApi {
         }
         val body = JSONObject().put("operationId", operationId).put("items", rows)
             .put("paymentAmountMinor", paymentAmountMinor).put("paymentMethod", paymentMethod)
+            .put("discountMinor", discountMinor)
         customerId?.let { body.put("customerId", it) }
         return request("/v1/sales", "POST", token, body)
     }
