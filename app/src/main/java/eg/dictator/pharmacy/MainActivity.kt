@@ -275,6 +275,7 @@ class PharmacyViewModel(
                             quantity = item.quantity,
                             minimumQuantity = item.lowStockThreshold,
                             barcode = item.barcode,
+                            imageUri = old?.imageUri,
                             updatedAt = System.currentTimeMillis(),
                             remoteId = item.id
                         )
@@ -817,6 +818,7 @@ private fun AddMedicineDialog(
                     if (imageUri != null) AsyncImage(model = imageUri, contentDescription = "صورة الدواء", modifier = Modifier.size(64.dp), contentScale = ContentScale.Crop)
                     OutlinedButton(enabled = !saving, onClick = { imagePicker.launch(arrayOf("image/*")) }) { Text(if (imageUri == null) "إضافة صورة الدواء" else "تغيير الصورة") }
                 }
+                Text("الصورة المختارة تُحفظ على هذا الجهاز فقط حاليًا.", color = Muted, style = MaterialTheme.typography.labelSmall)
                 error?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
