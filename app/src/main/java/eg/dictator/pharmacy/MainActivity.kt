@@ -582,6 +582,11 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     var stockFilterTab by remember { mutableIntStateOf(0) }
     var activeNav by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
+    val updateScope = rememberCoroutineScope()
+    var availableRelease by remember { mutableStateOf<AppRelease?>(null) }
+    var downloadedUpdate by remember { mutableStateOf<java.io.File?>(null) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf("الإصدار الحالي: " + BuildConfig.VERSION_NAME) }
     val visibleMedicines = when (stockFilterTab) {
         1 -> lowStock
         2 -> outOfStock
@@ -646,7 +651,57 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 }
                 2 -> { Text("المبيعات", color = Crimson, fontWeight = FontWeight.Bold); Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth()) { Text("عملية بيع جديدة") }; if (session.role == "manager") OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("الفواتير والتقارير") } }
                 3 -> { Text("المخزون", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label -> FilterChip(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, label = { Text(label) }) } }; val stockRows = when (stockFilterTab) { 1 -> lowStock; 2 -> outOfStock; else -> allMedicines }; if (stockRows.isEmpty()) Text("لا توجد أصناف في هذا القسم.", color = Muted) else MedicineStockList(stockRows, session.role == "manager") { selected = it } }
-                else -> { Text("المزيد", color = Crimson, fontWeight = FontWeight.Bold); OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }; if (session.role == "manager") { OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("التقارير والفواتير") }; OutlinedButton(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth()) { Text("إدارة الأجهزة ولوحة المدير") } } }
+                else -> {
+                    Text("المزيد", color = Crimson, fontWeight = FontWeight.Bold)
+                    OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
+                    if (session.role == "manager") {
+                        OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("التقارير والفواتير") }
+                        OutlinedButton(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth()) { Text("إدارة الأجهزة ولوحة المدير") }
+                    }
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            Text("تحديث التطبيق", color = Color(0xFF172B36), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text("نزّل آخر إصدار وثبّته مباشرة دون حذف التطبيق أو بيانات الصيدلية.", color = Muted)
+                            Text(updateMessage, color = Blue, style = MaterialTheme.typography.bodySmall)
+                            Button(enabled = !updateBusy, modifier = Modifier.fillMaxWidth(), onClick = {
+                                updateBusy = true
+                                updateMessage = "جارٍ التحقق من GitHub Releases..."
+                                updateScope.launch {
+                                    try {
+                                        val found = withContext(Dispatchers.IO) { AppUpdater.checkForUpdate() }
+                                        availableRelease = found
+                                        downloadedUpdate = null
+                                        updateMessage = if (found == null) "أنت تستخدم أحدث إصدار متاح." else "يتوفر الإصدار " + found.tag + " — الحجم التقريبي " + if (found.apkSize > 0) "%.1f MB".format(found.apkSize / 1048576.0) else "غير معروف"
+                                    } catch (error: Exception) { updateMessage = error.message ?: "تعذر التحقق من التحديث." }
+                                    finally { updateBusy = false }
+                                }
+                            }) { Text(if (updateBusy) "جارٍ التحقق..." else "التحقق من وجود تحديث") }
+                            availableRelease?.let { release ->
+                                Button(enabled = !updateBusy, modifier = Modifier.fillMaxWidth(), onClick = {
+                                    updateBusy = true
+                                    updateMessage = "جارٍ تنزيل الإصدار " + release.tag + "..."
+                                    updateScope.launch {
+                                        try {
+                                            val file = withContext(Dispatchers.IO) { AppUpdater.downloadRelease(context, release) }
+                                            downloadedUpdate = file
+                                            val opened = AppUpdater.installOrRequestPermission(context, file)
+                                            updateMessage = if (opened) "تم فتح مثبت Android. أكّد التثبيت لإكمال التحديث." else "اسمح بالتثبيت من هذا المصدر، ثم ارجع واضغط تثبيت التحديث."
+                                        } catch (error: Exception) { updateMessage = error.message ?: "تعذر تنزيل التحديث." }
+                                        finally { updateBusy = false }
+                                    }
+                                }) { Text(if (updateBusy) "جارٍ التنزيل..." else "تنزيل وتثبيت " + release.tag) }
+                            }
+                            downloadedUpdate?.let { file ->
+                                OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
+                                    try {
+                                        val opened = AppUpdater.installOrRequestPermission(context, file)
+                                        updateMessage = if (opened) "أكّد التثبيت في شاشة Android." else "فعّل إذن التثبيت ثم ارجع واضغط هذا الزر مرة أخرى."
+                                    } catch (error: Exception) { updateMessage = error.message ?: "تعذر فتح مثبت Android." }
+                                }) { Text("تثبيت التحديث الذي تم تنزيله") }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
