@@ -145,5 +145,7 @@ data class MedicineReference(
     val manufacturer: String,
     val drugClass: String,
     val route: String,
-    val priceEgp: Double?
+    val priceEgp: Double?,
+    val barcode: String? = null,
+    val uses: String = ""
 )
