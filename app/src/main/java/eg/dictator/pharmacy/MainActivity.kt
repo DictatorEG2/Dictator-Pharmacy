@@ -115,15 +115,15 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Text("DICTATOR", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
             Text("PHARMACY", color = Color(0xFFB9C5D8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Divider(color = Crimson)
-            Text("ابدأ بإعداد صيدليتك", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("أنشئ مساحة مستقلة لصيدليتك. هذا الجهاز سيصبح جهاز المدير الأول، ويمكن إضافة الموظفين لاحقًا بدعوات.", color = Muted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { signInMode = false; joinMode = false; error = null }) { Text("إنشاء") }
-                TextButton(onClick = { signInMode = false; joinMode = true; error = null }) { Text("انضمام") }
-                TextButton(onClick = { signInMode = true; joinMode = false; error = null }) { Text("تسجيل الدخول") }
+            Text("اختر طريقة الدخول", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("مسار المدير لإنشاء الصيدلية، ومسار الموظف للانضمام بدعوة أو الدخول بجهاز تمت الموافقة عليه.", color = Muted)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = { signInMode = false; joinMode = false; deviceName = "جهاز المدير"; error = null }, modifier = Modifier.fillMaxWidth()) { Text("مدير الصيدلية • إنشاء صيدلية") }
+                OutlinedButton(onClick = { signInMode = false; joinMode = true; deviceName = "جهاز موظف"; error = null }, modifier = Modifier.fillMaxWidth()) { Text("موظف • الانضمام بكود دعوة") }
+                OutlinedButton(onClick = { signInMode = true; joinMode = false; error = null }, modifier = Modifier.fillMaxWidth()) { Text("مدير أو موظف • دخول جهاز معتمد") }
             }
             if (signInMode) {
-                Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                Text("دخول جهاز تمت الموافقة عليه من مدير الصيدلية", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = deviceToken, onValueChange = { deviceToken = it.trim(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دخول الجهاز") },
@@ -162,7 +162,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     else Text("تسجيل الدخول")
                 }
             } else if (joinMode) {
-                Text("الانضمام إلى صيدلية موجودة", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                Text("انضمام الموظف إلى صيدلية موجودة", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = inviteCode, onValueChange = { inviteCode = it.filter { ch -> ch.isLetterOrDigit() }.take(16).uppercase(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دعوة المدير") },
@@ -240,7 +240,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     colors = ButtonDefaults.buttonColors(containerColor = Crimson)
                 ) {
                     if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
-                    else Text("إنشاء الصيدلية")
+                    else Text("إنشاء الصيدلية كمدير")
                 }
                 Text("بإنشاء الصيدلية يصبح هذا الجهاز مديرًا. لا تشارك رمز الجهاز مع أي شخص.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
