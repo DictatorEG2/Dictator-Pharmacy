@@ -24,7 +24,7 @@ object MedicineReferenceImporter {
         val input = try {
             if (source == "asset") context.assets.open("egyptian-drugs.csv")
             else {
-                val connection = URL("https://raw.githubusercontent.com/karem505/egyptian-drug-database/main/data/egyptian-drugs.csv").openConnection() as HttpURLConnection
+                val connection = URL("https://raw.githubusercontent.com/mahmoudfalous/eg-drugs/main/data/eg_drugs.csv").openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
                 connection.readTimeout = 20000
                 connection.instanceFollowRedirects = true
@@ -41,7 +41,7 @@ object MedicineReferenceImporter {
             BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
                 val header = reader.readLine()?.let(::parseCsvLine) ?: return@withContext 0
                 val columns = header.mapIndexed { index, name -> name.trim().removePrefix("\uFEFF") to index }.toMap()
-                val required = listOf("commercial_name_en", "commercial_name_ar", "scientific_name", "manufacturer", "drug_class", "route", "price_egp")
+                val required = listOf("id", "name", "arabic", "active", "company", "price", "barcode", "description", "uses")
                 if (required.any { it !in columns }) return@withContext 0
                 var rowId = 0
                 val batch = ArrayList<MedicineReference>(500)
@@ -50,19 +50,22 @@ object MedicineReferenceImporter {
                     if (line.isBlank()) continue
                     val cells = parseCsvLine(line)
                     fun value(key: String) = cells.getOrNull(columns.getValue(key)).orEmpty().trim()
-                    val en = value("commercial_name_en")
+                    val en = value("name")
                     if (en.isBlank()) continue
                     rowId++
-                    lastId = rowId
+                    val recordId = value("id").toIntOrNull() ?: rowId
+                    lastId = maxOf(lastId, recordId)
                     batch += MedicineReference(
-                        id = rowId,
+                        id = recordId,
                         commercialNameEn = en,
-                        commercialNameAr = value("commercial_name_ar"),
-                        scientificName = value("scientific_name"),
-                        manufacturer = value("manufacturer"),
-                        drugClass = value("drug_class"),
-                        route = value("route"),
-                        priceEgp = value("price_egp").replace(",", "").toDoubleOrNull()
+                        commercialNameAr = value("arabic"),
+                        scientificName = value("active"),
+                        manufacturer = value("company"),
+                        drugClass = value("description"),
+                        route = value("units"),
+                        priceEgp = value("price").replace(",", "").toDoubleOrNull(),
+                        barcode = value("barcode").takeIf { it.isNotBlank() },
+                        uses = value("uses")
                     )
                     if (batch.size == 500) {
                         dao.insertMedicineReferences(batch.toList())
