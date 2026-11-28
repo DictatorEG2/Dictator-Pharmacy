@@ -1,5 +1,6 @@
 package eg.dictator.pharmacy.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -147,5 +148,5 @@ data class MedicineReference(
     val route: String,
     val priceEgp: Double?,
     val barcode: String? = null,
-    val uses: String = ""
+    @ColumnInfo(defaultValue = "''") val uses: String = ""
 )
