@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class],
-    version = 6,
+    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class, SaleReturn::class],
+    version = 7,
     exportSchema = true
 )
 abstract class PharmacyDatabase : RoomDatabase() {
@@ -61,13 +61,22 @@ abstract class PharmacyDatabase : RoomDatabase() {
             }
         }
 
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS sale_returns (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, saleItemId INTEGER NOT NULL, medicineId INTEGER NOT NULL, quantity INTEGER NOT NULL, refundAmount REAL NOT NULL, reason TEXT NOT NULL, createdAt INTEGER NOT NULL, FOREIGN KEY(saleItemId) REFERENCES sale_items(id) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_sale_returns_saleItemId ON sale_returns(saleItemId)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_sale_returns_createdAt ON sale_returns(createdAt)")
+            }
+        }
+
         @Volatile private var instance: PharmacyDatabase? = null
         fun get(context: Context, pharmacyId: String): PharmacyDatabase = Room.databaseBuilder(
             context.applicationContext,
             PharmacyDatabase::class.java,
             "dictator_pharmacy_" + pharmacyId.replace("-", "") + ".db"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .build()
     }
 }
