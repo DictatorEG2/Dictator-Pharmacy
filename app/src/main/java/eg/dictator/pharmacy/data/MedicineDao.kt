@@ -13,6 +13,9 @@ abstract class MedicineDao {
     @Query("SELECT COUNT(*) FROM medicine_reference")
     abstract suspend fun referenceCount(): Int
 
+    @Query("DELETE FROM medicine_reference WHERE id > :lastId")
+    abstract suspend fun pruneMedicineReferences(lastId: Int)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     abstract suspend fun insertMedicineReferences(rows: List<MedicineReference>)
 
