@@ -688,6 +688,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                                     Text(reference.manufacturer, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                                     Text("السعر المرجعي: " + (reference.priceEgp?.let { "%.2f ج.م".format(it) } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelMedium)
                                     if (reference.drugClass.isNotBlank()) Text(reference.drugClass.replace('.', ' '), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    if (reference.uses.isNotBlank()) Text(reference.uses, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2)
                                     if (existingMedicine != null) Text("في مخزون الصيدلية: " + existingMedicine.quantity, color = Blue, style = MaterialTheme.typography.labelSmall)
                                 }
                                 if (existingMedicine == null && session.role == "manager") {
@@ -700,6 +701,10 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                         OutlinedButton(onClick = { vm.loadMoreReferenceMedicines() }, modifier = Modifier.fillMaxWidth()) {
                             Text(if (search.isBlank()) "عرض 20 دواء آخر" else "عرض 20 نتيجة أخرى")
                         }
+                    }
+                    Text("صور العبوات ليست ضمن مصدر البيانات؛ أضف صورة حقيقية عند تسجيل الصنف.", color = Muted, style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/mahmoudfalous/eg-drugs"))) }) {
+                        Text("مصدر دليل الأدوية: Egyptian Drug Database • CC BY 4.0")
                     }
                 }
                 2 -> { Text("المبيعات", color = Crimson, fontWeight = FontWeight.Bold); Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth()) { Text("عملية بيع جديدة") }; if (session.role == "manager") OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("الفواتير والتقارير") } }
