@@ -57,6 +57,35 @@ abstract class MedicineDao {
     abstract suspend fun clearSaleItems(saleId: Long)
 
 
+
+    @Query("SELECT id, saleId, medicineId, medicineName, unitPrice, quantity, lineTotal FROM sale_items WHERE id = :id LIMIT 1")
+    abstract suspend fun saleItemById(id: Long): SaleItem?
+
+    @Query("SELECT COALESCE(SUM(quantity), 0) FROM sale_returns WHERE saleItemId = :saleItemId")
+    abstract suspend fun returnedQuantity(saleItemId: Long): Int
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    abstract suspend fun insertSaleReturn(record: SaleReturn)
+
+    @Transaction
+    open suspend fun recordSaleReturn(saleItemId: Long, quantity: Int, reason: String): Double {
+        require(quantity > 0) { "كمية المرتجع يجب أن تكون أكبر من صفر" }
+        require(reason.isNotBlank()) { "اكتب سبب المرتجع" }
+        val item = saleItemById(saleItemId) ?: error("الصنف غير موجود في الفاتورة")
+        val alreadyReturned = returnedQuantity(saleItemId)
+        require(quantity <= item.quantity - alreadyReturned) {
+            "الكمية المتبقية للإرجاع: ${(item.quantity - alreadyReturned).coerceAtLeast(0)}"
+        }
+        val medicine = medicineById(item.medicineId) ?: error("لا يمكن ربط الصنف بمخزون الصيدلية")
+        require(medicine.remoteId != null) { "الصنف غير مرتبط بمخزون الصيدلية السحابي" }
+        val now = System.currentTimeMillis()
+        val refund = item.unitPrice * quantity
+        check(updateQuantity(medicine.id, quantity, now) == 1) { "تعذر إعادة الكمية للمخزون" }
+        insertMovement(StockMovement(medicineId = medicine.id, delta = quantity, reason = "مرتجع فاتورة #${item.saleId}: ${reason.trim()}", createdAt = now))
+        insertSaleReturn(SaleReturn(saleItemId = item.id, medicineId = medicine.id, quantity = quantity, refundAmount = refund, reason = reason.trim(), createdAt = now))
+        return refund
+    }
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     abstract suspend fun insertDebt(debt: CustomerDebt): Long
 
