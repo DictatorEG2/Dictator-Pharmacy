@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 abstract class MedicineDao {
+
+    @Query("SELECT COUNT(*) FROM medicine_reference")
+    abstract suspend fun referenceCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun insertMedicineReferences(rows: List<MedicineReference>)
+
+    @Query("SELECT id, commercialNameEn, commercialNameAr, scientificName, manufacturer, drugClass, route, priceEgp FROM medicine_reference WHERE commercialNameEn LIKE '%' || :query || '%' COLLATE NOCASE OR commercialNameAr LIKE '%' || :query || '%' COLLATE NOCASE OR scientificName LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY commercialNameAr COLLATE NOCASE LIMIT 30")
+    abstract fun searchMedicineReference(query: String): Flow<List<MedicineReference>>
+
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR category LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 100")
     abstract fun search(query: String): Flow<List<Medicine>>
 
