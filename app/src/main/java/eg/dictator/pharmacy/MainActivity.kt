@@ -52,6 +52,11 @@ import eg.dictator.pharmacy.data.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+private fun normalizeMedicineQuery(value: String): String = value.lowercase()
+    .replace(Regex("[\\u064B-\\u065F\\u0670\\u0640]"), "")
+    .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ٱ', 'ا')
+    .replace('ى', 'ي').trim()
+
 private fun startOfDay(): Long {
     val calendar = java.util.Calendar.getInstance()
     calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -358,9 +363,11 @@ class PharmacyViewModel(
         }
     }
     val searchText = MutableStateFlow("")
-    val referenceMedicines = searchText.flatMapLatest { query -> if (query.trim().length < 2) flowOf(emptyList()) else dao.searchMedicineReference(query.trim()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val medicines = searchText.flatMapLatest { dao.search(it.trim()) }
+    val referenceMedicines = searchText.flatMapLatest { query ->
+        val normalized = normalizeMedicineQuery(query)
+        if (normalized.isBlank()) flowOf(emptyList()) else dao.searchMedicineReference(normalized)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val medicines = searchText.flatMapLatest { dao.search(normalizeMedicineQuery(it)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val lowStock = dao.lowStock().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -617,96 +624,26 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            OutlinedTextField(
-                value = search,
-                onValueChange = { search = it; vm.searchText.value = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("ابحث باسم الدواء أو المادة الفعالة") },
-                singleLine = true
-            )
-            if (search.trim().length >= 2 && referenceMedicines.isNotEmpty()) {
-                Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("دليل الأدوية المصري • نتائج مرجعية", color = Crimson, fontWeight = FontWeight.Bold)
-                        referenceMedicines.take(6).forEach { reference ->
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold)
-                                    Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall)
-                                    Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                    Text("سعر مرجعي: " + (reference.priceEgp?.let { "%.2f".format(it) + " ج.م" } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelSmall)
-                                }
-                                if (session.role == "manager") {
-                                    TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة للصيدلية") }
-                                }
-                            }
-                            Divider(color = Color(0xFFE7E5DF))
-                        }
-                        Text("السعر المرجعي للاستدلال فقط؛ حدّد سعر البيع الفعلي عند الإضافة.", color = Muted, style = MaterialTheme.typography.labelSmall)
-                    }
+            when (activeNav) {
+                0 -> {
+                    Text("أهلاً بك في " + session.pharmacyName, color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("ملخص سريع لإدارة الصيدلية", color = Muted)
+                    Button(onClick = { showSale = true; activeNav = 2 }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
+                    OutlinedButton(onClick = { showDebts = true; activeNav = 4 }, modifier = Modifier.fillMaxWidth()) { Text("فتح مديونيات العملاء") }
+                    if (session.role == "manager") { OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }; Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") } }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { SummaryTile("أدوية المخزون", allMedicines.size.toString(), Modifier.weight(1f)); SummaryTile("مخزون منخفض", lowStock.size.toString(), Modifier.weight(1f)); SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f)) }
+                    Text("قائمة الأدوية موجودة في قسم الأدوية أسفل الشاشة.", color = Muted)
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Crimson)) { Text("بدء عملية بيع") }
-            Spacer(Modifier.height(8.dp))
-            if (session.role == "manager") {
-                OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("سجل الفواتير وتقارير المبيعات") }
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }
-            Spacer(Modifier.height(8.dp))
-            if (session.role == "manager") {
-                Button(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Blue)) { Text("لوحة المدير") }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryTile("كل الأدوية", medicines.size.toString(), Modifier.weight(1f))
-                SummaryTile("مخزون منخفض", lowStock.size.toString(), Modifier.weight(1f))
-                SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(12.dp))
-            TabRow(selectedTabIndex = stockFilterTab, containerColor = Panel, contentColor = Color.White) {
-                listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label ->
-                    Tab(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, text = { Text(label) })
+                1 -> {
+                    Text("الأدوية", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(value = search, onValueChange = { search = it; vm.searchText.value = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث بالعربية أو English أو المادة الفعالة") }, singleLine = true)
+                    if (search.isNotBlank()) { Text("دليل الأدوية", color = Crimson, fontWeight = FontWeight.Bold); if (referenceMedicines.isEmpty()) Text("لا توجد نتائج في الدليل لهذا البحث. جرّب جزءًا من الاسم أو المادة الفعالة.", color = Muted)
+                        referenceMedicines.take(30).forEach { reference -> Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) { Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) { Surface(modifier = Modifier.size(52.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = "صورة دواء توضيحية", tint = Crimson) } }; Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold); Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall); Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1); Text("القسم: " + reference.drugClass.ifBlank { "غير محدد" } + " • السعر المرجعي: " + (reference.priceEgp?.let { "%.2f ج.م".format(it) } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelSmall) }; if (session.role == "manager") TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة") } } } } }
+                    Text("أدوية الصيدلية", color = Crimson, fontWeight = FontWeight.Bold); if (visibleMedicines.isEmpty()) Text("لا توجد أدوية مضافة تطابق البحث. يمكنك اختيار دواء من الدليل وإضافته.", color = Muted) else MedicineStockList(visibleMedicines, session.role == "manager") { selected = it }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-            if (visibleMedicines.isEmpty()) {
-                Text(when (stockFilterTab) {
-                    1 -> "لا توجد أصناف منخفضة المخزون."
-                    2 -> "لا توجد أصناف نفد مخزونها."
-                    else -> "لا توجد أدوية مطابقة. اضغط + لإضافة دواء."
-                }, color = Muted)
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(visibleMedicines, key = { it.id }) { medicine ->
-                        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
-                                        Text(medicine.category, color = Muted)
-                                        Text("السعر: " + medicine.sellingPrice + " ج.م", color = Color(0xFF172B36))
-                                    }
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(medicine.quantity.toString(), color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall)
-                                        Text("عبوة", color = Muted)
-                                    }
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                if (session.role == "manager") {
-                                    Button(
-                                        onClick = { selected = medicine },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Crimson)
-                                    ) { Text("تعديل الكمية") }
-                                }
-                                if (medicine.quantity == 0) Text("نفد المخزون", color = Color(0xFFFF7777))
-                                else if (medicine.quantity <= medicine.minimumQuantity) Text("مخزون منخفض", color = Color(0xFFFFC36B))
-                            }
-                        }
-                    }
-                }
+                2 -> { Text("المبيعات", color = Crimson, fontWeight = FontWeight.Bold); Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth()) { Text("عملية بيع جديدة") }; if (session.role == "manager") OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("الفواتير والتقارير") } }
+                3 -> { Text("المخزون", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label -> FilterChip(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, label = { Text(label) }) } }; val stockRows = when (stockFilterTab) { 1 -> lowStock; 2 -> outOfStock; else -> allMedicines }; if (stockRows.isEmpty()) Text("لا توجد أصناف في هذا القسم.", color = Muted) else MedicineStockList(stockRows, session.role == "manager") { selected = it } }
+                else -> { Text("المزيد", color = Crimson, fontWeight = FontWeight.Bold); OutlinedButton(onClick = { showDebts = true }, modifier = Modifier.fillMaxWidth()) { Text("مديونيات العملاء") }; if (session.role == "manager") { OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("التقارير والفواتير") }; OutlinedButton(onClick = { showManager = true }, modifier = Modifier.fillMaxWidth()) { Text("إدارة الأجهزة ولوحة المدير") } } }
             }
         }
     }
@@ -769,6 +706,27 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun MedicineStockList(medicines: List<Medicine>, canAdjust: Boolean, onAdjust: (Medicine) -> Unit) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
+        items(medicines, key = { it.id }) { medicine ->
+            Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!medicine.imageUri.isNullOrBlank()) AsyncImage(model = medicine.imageUri, contentDescription = medicine.name, modifier = Modifier.size(62.dp), contentScale = ContentScale.Crop)
+                    else Surface(modifier = Modifier.size(62.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = "لا توجد صورة مضافة", tint = Crimson, modifier = Modifier.size(30.dp)) } }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                        Text("القسم: " + medicine.category, color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Text("السعر: %.2f ج.م • المتاح: %d".format(medicine.sellingPrice, medicine.quantity), color = Blue, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (canAdjust) IconButton(onClick = { onAdjust(medicine) }) { Icon(Icons.Default.Inventory2, contentDescription = "تعديل المخزون", tint = Crimson) }
+                }
+            }
+        }
     }
 }
 
@@ -1207,9 +1165,9 @@ private fun AddCustomerDebtDialog(
         Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم العميل") }, singleLine = true)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
-            medicines.filter { it.quantity > 0 && (query.isBlank() || it.name.contains(query, true)) }.take(60).forEach { m ->
+            medicines.filter { it.quantity > 0 && (query.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(query)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(query))) }.take(100).forEach { m ->
                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(8.dp)).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(m.name, color = Color(0xFF172B36)); Text("%.2f ج.م".format(m.sellingPrice), color = Muted) }
+                    if (!m.imageUri.isNullOrBlank()) AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.size(48.dp), contentScale = ContentScale.Crop) else Surface(modifier = Modifier.size(48.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(8.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = null, tint = Crimson) } }; Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(m.name, color = Color(0xFF172B36)); Text("القسم: " + m.category, color = Muted); Text("%.2f ج.م • المتاح %d".format(m.sellingPrice, m.quantity), color = Muted) }
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n < m.quantity) cart[m.id] = n + 1 }) { Text("+") }
                     Text((cart[m.id] ?: 0).toString())
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n <= 1) cart.remove(m.id) else cart[m.id] = n - 1 }) { Text("−") }
