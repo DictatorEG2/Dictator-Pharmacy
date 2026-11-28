@@ -363,10 +363,18 @@ class PharmacyViewModel(
         }
     }
     val searchText = MutableStateFlow("")
-    val referenceMedicines = searchText.flatMapLatest { query ->
-        val normalized = normalizeMedicineQuery(query)
-        if (normalized.isBlank()) flowOf(emptyList()) else dao.searchMedicineReference(normalized)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val referencePage = MutableStateFlow(0)
+    fun setSearchText(value: String) {
+        referencePage.value = 0
+        searchText.value = value
+    }
+    fun loadMoreReferenceMedicines() { referencePage.value += 1 }
+    val referenceMedicines = combine(searchText, referencePage) { query, page -> query to page }
+        .flatMapLatest { (query, page) ->
+            val normalized = normalizeMedicineQuery(query)
+            if (normalized.isBlank()) dao.browseMedicineReference(limit = 20, offset = page * 20)
+            else dao.searchMedicineReference(normalized, limit = 20, offset = page * 20)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val medicines = searchText.flatMapLatest { dao.search(normalizeMedicineQuery(it)) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allMedicines = dao.allMedicines().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
