@@ -107,7 +107,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("DICTATOR", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
+            Text("DICTATOR", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
             Text("PHARMACY", color = Color(0xFFB9C5D8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Divider(color = Crimson)
             Text("ابدأ بإعداد صيدليتك", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -564,6 +564,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
             Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 18.dp, vertical = 14.dp)) {
                 Text("DICTATOR PHARMACY", color = Crimson, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Text("إدارة دقيقة… وصيدلية أكثر كفاءة", color = Blue, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                Text("تطوير Dictator_EG@", color = Muted, style = MaterialTheme.typography.labelSmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("إدارة الصيدلية  •  ${session.pharmacyName}", color = Muted, style = MaterialTheme.typography.labelMedium)
                     TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Dictator_channel2"))) }) {
