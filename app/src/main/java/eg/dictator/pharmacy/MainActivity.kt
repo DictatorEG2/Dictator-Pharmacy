@@ -502,7 +502,7 @@ class PharmacyViewModel(
         viewModelScope.launch {
             try {
                 val operationKey = lines.sortedBy { it.medicineId }
-                    .joinToString("|") { "${it.medicineId}:${it.quantity}" }
+                    .joinToString("|") { "${it.medicineId}:${it.quantity}" } + "|discount:" + discountPercent
                 val operationId = pendingSaleOperations.getOrPut(operationKey) {
                     java.util.UUID.randomUUID().toString()
                 }
@@ -513,7 +513,7 @@ class PharmacyViewModel(
                     Triple(remoteId, line.quantity, medicine.sellingPrice)
                 }
                 val remoteLines = selected.map { it.first to it.second }
-                val subtotalMinor = selected.sumOf { (_, quantity, price) -> (price * 100.0 * quantity).toLong() }
+                val subtotalMinor = selected.sumOf { (_, quantity, price) -> kotlin.math.round(price * 100.0 * quantity).toLong() }
                 val discountMinor = kotlin.math.round(subtotalMinor * discountPercent / 100.0).toLong()
                 val response = withContext(Dispatchers.IO) {
                     PharmacyDataApi.createSale(session.token, operationId, remoteLines, discountMinor = discountMinor)
