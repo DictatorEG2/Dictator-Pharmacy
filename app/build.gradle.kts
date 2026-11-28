@@ -12,8 +12,29 @@ android {
         applicationId = "eg.dictator.pharmacy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+    signingConfigs {
+        create("stable") {
+            val keyPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!keyPath.isNullOrBlank()) {
+                storeFile = file(keyPath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            val keyPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (!keyPath.isNullOrBlank()) signingConfig = signingConfigs.getByName("stable")
+        }
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("stable")
+            isMinifyEnabled = false
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
