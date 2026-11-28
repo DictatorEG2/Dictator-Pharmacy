@@ -586,7 +586,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
         1 -> lowStock
         2 -> outOfStock
         else -> medicines
-    }.filter { search.isBlank() || it.name.contains(search, ignoreCase = true) || it.category.contains(search, ignoreCase = true) }
+    }.filter { search.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(search)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(search)) }
 
     Scaffold(
         containerColor = Ink,
@@ -1165,7 +1165,9 @@ private fun AddCustomerDebtDialog(
         Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم العميل") }, singleLine = true)
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
-            medicines.filter { it.quantity > 0 && (query.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(query)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(query))) }.take(100).forEach { m ->
+            val matchingMedicines = medicines.filter { it.quantity > 0 && (query.isBlank() || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(query)) || normalizeMedicineQuery(it.category).contains(normalizeMedicineQuery(query))) }.take(100)
+            if (matchingMedicines.isEmpty()) Text("لا توجد أدوية متاحة بهذا الاسم في مخزون الصيدلية. أضف الدواء من قسم الأدوية أولًا.", color = Muted)
+            matchingMedicines.forEach { m ->
                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(8.dp)).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!m.imageUri.isNullOrBlank()) AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.size(48.dp), contentScale = ContentScale.Crop) else Surface(modifier = Modifier.size(48.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(8.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = null, tint = Crimson) } }; Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(m.name, color = Color(0xFF172B36)); Text("القسم: " + m.category, color = Muted); Text("%.2f ج.م • المتاح %d".format(m.sellingPrice, m.quantity), color = Muted) }
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n < m.quantity) cart[m.id] = n + 1 }) { Text("+") }
