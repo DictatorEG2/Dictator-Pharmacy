@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.URL
+import java.net.HttpURLConnection
 
 /**
  * Imports the CC0 Egyptian medicine reference list into each pharmacy's local
@@ -13,13 +15,28 @@ import java.io.InputStreamReader
  */
 object MedicineReferenceImporter {
     suspend fun ensureImported(context: Context, dao: MedicineDao): Int = withContext(Dispatchers.IO) {
-        if (dao.referenceCount() > 0) return@withContext dao.referenceCount()
+        val existing = dao.referenceCount()
+        val prefs = context.getSharedPreferences("medicine_reference_sync", Context.MODE_PRIVATE)
+        val lastSync = prefs.getLong("last_sync", 0L)
+        val shouldRefresh = System.currentTimeMillis() - lastSync > 24L * 60L * 60L * 1000L
+        val source = if (existing == 0) "asset" else if (shouldRefresh) "network" else "none"
+        if (source == "none") return@withContext existing
         val input = try {
-            context.assets.open("egyptian-drugs.csv")
+            if (source == "asset") context.assets.open("egyptian-drugs.csv")
+            else {
+                val connection = URL("https://raw.githubusercontent.com/karem505/egyptian-drug-database/main/data/egyptian-drugs.csv").openConnection() as HttpURLConnection
+                connection.connectTimeout = 10000
+                connection.readTimeout = 20000
+                connection.instanceFollowRedirects = true
+                connection.connect()
+                if (connection.responseCode !in 200..299) error("Medicine catalog HTTP " + connection.responseCode)
+                connection.inputStream
+            }
         } catch (_: Exception) {
-            return@withContext 0
+            return@withContext existing
         }
         var inserted = 0
+        var lastId = 0
         input.use { stream ->
             BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
                 val header = reader.readLine()?.let(::parseCsvLine) ?: return@withContext 0
@@ -36,6 +53,7 @@ object MedicineReferenceImporter {
                     val en = value("commercial_name_en")
                     if (en.isBlank()) continue
                     rowId++
+                    lastId = rowId
                     batch += MedicineReference(
                         id = rowId,
                         commercialNameEn = en,
@@ -58,7 +76,11 @@ object MedicineReferenceImporter {
                 }
             }
         }
-        inserted
+        if (inserted > 0) {
+            dao.pruneMedicineReferences(lastId)
+            prefs.edit().putLong("last_sync", System.currentTimeMillis()).apply()
+        }
+        inserted + existing
     }
 
     private fun parseCsvLine(line: String): List<String> {
