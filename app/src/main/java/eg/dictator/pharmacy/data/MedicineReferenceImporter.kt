@@ -18,8 +18,10 @@ object MedicineReferenceImporter {
         val existing = dao.referenceCount()
         val prefs = context.getSharedPreferences("medicine_reference_sync", Context.MODE_PRIVATE)
         val lastSync = prefs.getLong("last_sync", 0L)
+        val catalogVersion = prefs.getInt("catalog_version", 0)
         val shouldRefresh = System.currentTimeMillis() - lastSync > 24L * 60L * 60L * 1000L
-        val source = if (existing == 0) "asset" else if (shouldRefresh) "network" else "none"
+        // Force the larger barcode-enabled catalogue into databases created by older app versions.
+        val source = if (existing == 0 || catalogVersion < 2) "asset" else if (shouldRefresh) "network" else "none"
         if (source == "none") return@withContext existing
         val input = try {
             if (source == "asset") context.assets.open("egyptian-drugs.csv")
@@ -81,7 +83,7 @@ object MedicineReferenceImporter {
         }
         if (inserted > 0) {
             dao.pruneMedicineReferences(lastId)
-            prefs.edit().putLong("last_sync", System.currentTimeMillis()).apply()
+            prefs.edit().putLong("last_sync", System.currentTimeMillis()).putInt("catalog_version", 2).apply()
         }
         inserted + existing
     }
