@@ -582,6 +582,8 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     val medicines by vm.medicines.collectAsState()
     val allMedicines by vm.allMedicines.collectAsState()
     val referenceMedicines by vm.referenceMedicines.collectAsState()
+    val referenceMedicineCount by vm.referenceMedicineCount.collectAsState()
+    val referencePageIndex by vm.referencePageIndex.collectAsState()
     val lowStock by vm.lowStock.collectAsState()
     val outOfStock by vm.outOfStock.collectAsState()
     val recentSales by vm.recentSales.collectAsState()
@@ -639,7 +641,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) {
             when (activeNav) {
                 0 -> {
                     Text("أهلاً بك في " + session.pharmacyName, color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -651,14 +653,54 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                     Text("قائمة الأدوية موجودة في قسم الأدوية أسفل الشاشة.", color = Muted)
                 }
                 1 -> {
-                    Text("الأدوية", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(value = search, onValueChange = { search = it; vm.searchText.value = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث بالعربية أو English أو المادة الفعالة") }, singleLine = true)
-                    if (search.isNotBlank()) { Text("دليل الأدوية • صور العبوات غير متوفرة في مصدر البيانات، ويمكنك إضافة صورة عند تسجيل الصنف", color = Crimson, fontWeight = FontWeight.Bold); if (referenceMedicines.isEmpty()) Text("لا توجد نتائج في الدليل لهذا البحث. جرّب جزءًا من الاسم أو المادة الفعالة.", color = Muted)
-                        referenceMedicines.take(10).forEach { reference -> Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) { Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) { val existingMedicine = allMedicines.firstOrNull { normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(reference.commercialNameAr)) || normalizeMedicineQuery(it.name).contains(normalizeMedicineQuery(reference.commercialNameEn)) }
-                                    if (existingMedicine?.imageUri?.isNotBlank() == true) AsyncImage(model = existingMedicine.imageUri, contentDescription = reference.commercialNameAr, modifier = Modifier.size(52.dp), contentScale = ContentScale.Crop)
-                                    else Surface(modifier = Modifier.size(52.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Medication, contentDescription = "لا تتوفر صورة لهذا الدواء", tint = Crimson) } }
-                                    Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold); Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall); Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1); Text("القسم: " + reference.drugClass.ifBlank { "غير محدد" } + " • السعر المرجعي: " + (reference.priceEgp?.let { "%.2f ج.م".format(it) } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelSmall) }; if (existingMedicine != null) Text("في المخزون: " + existingMedicine.quantity, color = Blue, style = MaterialTheme.typography.labelSmall) else if (session.role == "manager") TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة") } } } } }
-                    Text("أدوية الصيدلية", color = Crimson, fontWeight = FontWeight.Bold); if (visibleMedicines.isEmpty()) Text("لا توجد أدوية مضافة تطابق البحث. يمكنك اختيار دواء من الدليل وإضافته.", color = Muted) else MedicineStockList(visibleMedicines, session.role == "manager") { selected = it }
+                    Text("دليل الأدوية المصري", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(if (referenceMedicineCount > 0) "$referenceMedicineCount دواء مسجل في الدليل • اعرض وأضف لمخزونك" else "جارٍ تجهيز قاعدة بيانات الأدوية...", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(value = search, onValueChange = { search = it; vm.setSearchText(it) }, modifier = Modifier.fillMaxWidth(), label = { Text("اسم الدواء بالعربي أو English أو المادة الفعالة أو الباركود") }, singleLine = true)
+                    if (referenceMedicineCount == 0) {
+                        Text("يتم تحميل دليل الأدوية أول مرة. تأكد من اتصال الإنترنت إذا لم تظهر القائمة.", color = Muted)
+                    } else if (referenceMedicines.isEmpty()) {
+                        Text(if (search.isBlank()) "جارٍ تحميل الأدوية..." else "لا توجد نتائج مطابقة. جرّب الاسم التجاري أو المادة الفعالة.", color = Muted)
+                    }
+                    referenceMedicines.forEach { reference ->
+                        val normalizedAr = normalizeMedicineQuery(reference.commercialNameAr)
+                        val normalizedEn = normalizeMedicineQuery(reference.commercialNameEn)
+                        val existingMedicine = allMedicines.firstOrNull {
+                            val savedName = normalizeMedicineQuery(it.name)
+                            (normalizedAr.isNotBlank() && savedName.contains(normalizedAr)) ||
+                                (normalizedEn.isNotBlank() && savedName.contains(normalizedEn))
+                        }
+                        Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (existingMedicine?.imageUri?.isNotBlank() == true) {
+                                    AsyncImage(model = existingMedicine.imageUri, contentDescription = reference.commercialNameAr, modifier = Modifier.size(68.dp), contentScale = ContentScale.Crop)
+                                } else {
+                                    Surface(modifier = Modifier.size(68.dp), color = Color(0xFFE9EEF0), shape = RoundedCornerShape(10.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Medication, contentDescription = "صورة العبوة غير متاحة في مصدر البيانات", tint = Crimson, modifier = Modifier.size(32.dp))
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(reference.commercialNameAr.ifBlank { reference.commercialNameEn }, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                                    Text(reference.commercialNameEn, color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    if (reference.scientificName.isNotBlank()) Text(reference.scientificName, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                                    Text(reference.manufacturer, color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    Text("السعر المرجعي: " + (reference.priceEgp?.let { "%.2f ج.م".format(it) } ?: "غير متاح"), color = Blue, style = MaterialTheme.typography.labelMedium)
+                                    if (reference.drugClass.isNotBlank()) Text(reference.drugClass.replace('.', ' '), color = Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    if (existingMedicine != null) Text("في مخزون الصيدلية: " + existingMedicine.quantity, color = Blue, style = MaterialTheme.typography.labelSmall)
+                                }
+                                if (existingMedicine == null && session.role == "manager") {
+                                    TextButton(onClick = { selectedReference = reference; showAdd = true }) { Text("إضافة للمخزون") }
+                                }
+                            }
+                        }
+                    }
+                    if (referenceMedicines.size == 20 * (referencePageIndex + 1)) {
+                        OutlinedButton(onClick = { vm.loadMoreReferenceMedicines() }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (search.isBlank()) "عرض 20 دواء آخر" else "عرض 20 نتيجة أخرى")
+                        }
+                    }
                 }
                 2 -> { Text("المبيعات", color = Crimson, fontWeight = FontWeight.Bold); Button(onClick = { showSale = true }, modifier = Modifier.fillMaxWidth()) { Text("عملية بيع جديدة") }; if (session.role == "manager") OutlinedButton(onClick = { showReports = true }, modifier = Modifier.fillMaxWidth()) { Text("الفواتير والتقارير") } }
                 3 -> { Text("المخزون", color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label -> FilterChip(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, label = { Text(label) }) } }; val stockRows = when (stockFilterTab) { 1 -> lowStock; 2 -> outOfStock; else -> allMedicines }; if (stockRows.isEmpty()) Text("لا توجد أصناف في هذا القسم.", color = Muted) else MedicineStockList(stockRows, session.role == "manager") { selected = it } }
