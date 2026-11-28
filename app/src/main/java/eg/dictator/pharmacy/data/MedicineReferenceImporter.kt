@@ -9,7 +9,7 @@ import java.net.URL
 import java.net.HttpURLConnection
 
 /**
- * Imports the CC0 Egyptian medicine reference list into each pharmacy's local
+ * Imports the CC BY 4.0 Egyptian medicine reference list into each pharmacy's local
  * Room database once. Reference prices are informational only; pharmacy
  * selling prices are entered separately when adding stock.
  */
