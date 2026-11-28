@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class, SaleReturn::class],
-    version = 7,
+    entities = [Medicine::class, StockMovement::class, Sale::class, SaleItem::class, CustomerDebt::class, DebtItem::class, DebtPayment::class, SaleReturn::class, MedicineReference::class],
+    version = 8,
     exportSchema = true
 )
 abstract class PharmacyDatabase : RoomDatabase() {
@@ -70,13 +70,23 @@ abstract class PharmacyDatabase : RoomDatabase() {
             }
         }
 
+
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("CREATE TABLE IF NOT EXISTS medicine_reference (id INTEGER NOT NULL PRIMARY KEY, commercialNameEn TEXT NOT NULL, commercialNameAr TEXT NOT NULL, scientificName TEXT NOT NULL, manufacturer TEXT NOT NULL, drugClass TEXT NOT NULL, route TEXT NOT NULL, priceEgp REAL)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_commercialNameAr ON medicine_reference(commercialNameAr)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_scientificName ON medicine_reference(scientificName)")
+                database.execSQL("CREATE INDEX IF NOT EXISTS index_medicine_reference_manufacturer ON medicine_reference(manufacturer)")
+            }
+        }
+
         @Volatile private var instance: PharmacyDatabase? = null
         fun get(context: Context, pharmacyId: String): PharmacyDatabase = Room.databaseBuilder(
             context.applicationContext,
             PharmacyDatabase::class.java,
             "dictator_pharmacy_" + pharmacyId.replace("-", "") + ".db"
         )
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .build()
     }
 }
