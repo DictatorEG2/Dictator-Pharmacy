@@ -111,7 +111,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
             Text("DICTATOR", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
             Text("PHARMACY", color = Color(0xFFB9C5D8), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Divider(color = Crimson)
-            Text("ابدأ بإعداد صيدليتك", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("ابدأ بإعداد صيدليتك", color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("أنشئ مساحة مستقلة لصيدليتك. هذا الجهاز سيصبح جهاز المدير الأول، ويمكن إضافة الموظفين لاحقًا بدعوات.", color = Muted)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { signInMode = false; joinMode = false; error = null }) { Text("إنشاء") }
@@ -119,7 +119,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                 TextButton(onClick = { signInMode = true; joinMode = false; error = null }) { Text("تسجيل الدخول") }
             }
             if (signInMode) {
-                Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("تسجيل دخول جهاز تمت الموافقة عليه", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = deviceToken, onValueChange = { deviceToken = it.trim(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دخول الجهاز") },
@@ -154,11 +154,11 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = Crimson)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
                     else Text("تسجيل الدخول")
                 }
             } else if (joinMode) {
-                Text("الانضمام إلى صيدلية موجودة", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("الانضمام إلى صيدلية موجودة", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 OutlinedTextField(
                     value = inviteCode, onValueChange = { inviteCode = it.filter { ch -> ch.isLetterOrDigit() }.take(16).uppercase(); error = null },
                     modifier = Modifier.fillMaxWidth(), label = { Text("رمز دعوة المدير") },
@@ -189,7 +189,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading && inviteCode.length == 16 && deviceName.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = Blue)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
                     else Text("إرسال طلب الانضمام")
                 }
                 Text("بعد موافقة المدير، سيعطيك رمز دخول خاص بهذا الجهاز.", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -235,7 +235,7 @@ private fun PharmacyOnboardingScreen(onRegistered: (SecureSessionStore.Session) 
                     modifier = Modifier.fillMaxWidth(), enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = Crimson)
                 ) {
-                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color(0xFF172B36), strokeWidth = 2.dp)
                     else Text("إنشاء الصيدلية")
                 }
                 Text("بإنشاء الصيدلية يصبح هذا الجهاز مديرًا. لا تشارك رمز الجهاز مع أي شخص.", color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -675,12 +675,12 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(medicine.name, color = Color.White, fontWeight = FontWeight.Bold)
+                                        Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                                         Text(medicine.category, color = Muted)
-                                        Text("السعر: " + medicine.sellingPrice + " ج.م", color = Color.White)
+                                        Text("السعر: " + medicine.sellingPrice + " ج.م", color = Color(0xFF172B36))
                                     }
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(medicine.quantity.toString(), color = Color.White, style = MaterialTheme.typography.headlineSmall)
+                                        Text(medicine.quantity.toString(), color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall)
                                         Text("عبوة", color = Muted)
                                     }
                                 }
@@ -766,7 +766,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
 private fun SummaryTile(label: String, value: String, modifier: Modifier = Modifier) {
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(value, color = Color(0xFF172B36), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -894,14 +894,14 @@ private fun SaleDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(medicine.name, color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(medicine.name, color = Color(0xFF172B36), fontWeight = FontWeight.SemiBold)
                             Text("${medicine.sellingPrice} ج.م • المتاح ${medicine.quantity}", color = Muted)
                         }
                         TextButton(onClick = {
                             val current = cart[medicine.id] ?: 0
                             if (current < medicine.quantity) cart[medicine.id] = current + 1
                         }) { Text("+") }
-                        Text((cart[medicine.id] ?: 0).toString(), color = Color.White)
+                        Text((cart[medicine.id] ?: 0).toString(), color = Color(0xFF172B36))
                         TextButton(onClick = {
                             val current = cart[medicine.id] ?: 0
                             if (current <= 1) cart.remove(medicine.id) else cart[medicine.id] = current - 1
@@ -917,7 +917,7 @@ private fun SaleDialog(
                         Text("${cart[medicine.id]} × ${medicine.sellingPrice} ج.م")
                     }
                 }
-                Text("الإجمالي: %.2f ج.م".format(total), color = Color.White, fontWeight = FontWeight.Bold)
+                Text("الإجمالي: %.2f ج.م".format(total), color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 message?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
@@ -1009,7 +1009,7 @@ private fun SalesReportDialog(
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text("إجمالي المبيعات", color = Muted)
-                        Text("%.2f ج.م".format(revenue), color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("%.2f ج.م".format(revenue), color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("عدد الفواتير: $salesCount", color = Muted)
                     }
                 }
@@ -1129,7 +1129,7 @@ private fun CustomerDebtsDialog(
                 val remaining = (d.totalAmount - d.paidAmount).coerceAtLeast(0.0)
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(d.customerName, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(d.customerName, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text("الإجمالي: %.2f • المدفوع: %.2f ج.م".format(d.totalAmount, d.paidAmount), color = Muted)
                         Text("المتبقي: %.2f ج.م".format(remaining), color = if (remaining > 0) Color(0xFFFFC36B) else Color(0xFF75C995), fontWeight = FontWeight.Bold)
                         entry.items.forEach { item -> Text("• ${item.medicineName} — ${item.quantity} × ${item.unitPrice}", color = Muted) }
@@ -1178,7 +1178,7 @@ private fun AddCustomerDebtDialog(
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("ابحث عن دواء") }, singleLine = true)
             medicines.filter { it.quantity > 0 && (query.isBlank() || it.name.contains(query, true)) }.take(60).forEach { m ->
                 Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(8.dp)).padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { Text(m.name, color = Color.White); Text("%.2f ج.م".format(m.sellingPrice), color = Muted) }
+                    Column(Modifier.weight(1f)) { Text(m.name, color = Color(0xFF172B36)); Text("%.2f ج.م".format(m.sellingPrice), color = Muted) }
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n < m.quantity) cart[m.id] = n + 1 }) { Text("+") }
                     Text((cart[m.id] ?: 0).toString())
                     TextButton(onClick = { val n = cart[m.id] ?: 0; if (n <= 1) cart.remove(m.id) else cart[m.id] = n - 1 }) { Text("−") }
@@ -1287,7 +1287,7 @@ private fun ManagerDashboardDialog(
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("مديونيات العملاء المفتوحة", color = Muted)
-                        Text("${activeDebts.size} مديونية", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("${activeDebts.size} مديونية", color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text("إجمالي المتبقي: %.2f ج.م".format(debtBalance), color = Color(0xFFFFC36B))
                     }
                 }
@@ -1357,7 +1357,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("رمز دخول الجهاز بعد الموافقة — يظهر مرة واحدة", color = Color(0xFFFFC36B))
-                        Text(token, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        Text(token, color = Color(0xFF172B36), style = MaterialTheme.typography.bodySmall)
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(token)) }) {
                             Text("نسخ رمز الجهاز")
                         }
@@ -1369,7 +1369,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("رمز الدعوة", color = Muted)
-                        Text(code, color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(code, color = Color(0xFF172B36), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(code)) }) {
                             Text("نسخ الرمز")
                         }
@@ -1385,7 +1385,7 @@ private fun ManagerDevicesSection(session: SecureSessionStore.Session) {
             devices.forEach { device ->
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(device.name, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(device.name, color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                         Text(
                             when (device.status) {
                                 "pending" -> "بانتظار موافقة المدير"
