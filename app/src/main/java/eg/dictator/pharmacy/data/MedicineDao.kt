@@ -13,6 +13,9 @@ abstract class MedicineDao {
     @Query("SELECT COUNT(*) FROM medicine_reference")
     abstract suspend fun referenceCount(): Int
 
+    @Query("SELECT COUNT(*) FROM medicine_reference")
+    abstract fun observeReferenceCount(): Flow<Int>
+
     @Query("DELETE FROM medicine_reference WHERE id > :lastId")
     abstract suspend fun pruneMedicineReferences(lastId: Int)
 
