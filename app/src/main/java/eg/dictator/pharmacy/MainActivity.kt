@@ -1,6 +1,8 @@
 package eg.dictator.pharmacy
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -14,6 +16,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -49,18 +57,19 @@ private fun startOfDay(): Long {
     return calendar.timeInMillis
 }
 
-private val Ink = Color(0xFF101116)
-private val Panel = Color(0xFF1A1C24)
-private val Crimson = Color(0xFF650D24)
-private val Blue = Color(0xFF183A66)
-private val Muted = Color(0xFF9BA1AE)
+private val Ink = Color(0xFFF4F2ED)
+private val Panel = Color(0xFFFFFFFF)
+private val Crimson = Color(0xFF183B4E)
+private val Blue = Color(0xFF2F6D68)
+private val Muted = Color(0xFF687780)
+private val Champagne = Color(0xFFC5A46D)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             var session by remember { mutableStateOf(SecureSessionStore.read(this)) }
-            MaterialTheme(colorScheme = darkColorScheme(primary = Crimson, secondary = Blue, background = Ink, surface = Panel)) {
+            MaterialTheme(colorScheme = lightColorScheme(primary = Crimson, secondary = Blue, background = Ink, surface = Panel)) {
                 if (session == null) {
                     PharmacyOnboardingScreen(onRegistered = { created -> session = created })
                 } else {
@@ -531,8 +540,10 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     val reportRevenue by vm.reportRevenue.collectAsState()
     val reportCount by vm.reportCount.collectAsState()
     val reportTopSelling by vm.reportTopSelling.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val visibleMedicines = when (selectedTab) {
+    var stockFilterTab by remember { mutableIntStateOf(0) }
+    var activeNav by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val visibleMedicines = when (stockFilterTab) {
         1 -> lowStock
         2 -> outOfStock
         else -> medicines
@@ -540,13 +551,28 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
 
     Scaffold(
         containerColor = Ink,
+        bottomBar = {
+            NavigationBar(containerColor = Panel, contentColor = Crimson) {
+                NavigationBarItem(selected = activeNav == 0, onClick = { activeNav = 0; stockFilterTab = 0 }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("الرئيسية") })
+                NavigationBarItem(selected = activeNav == 1, onClick = { activeNav = 1; stockFilterTab = 0 }, icon = { Icon(Icons.Default.Medication, null) }, label = { Text("الأدوية") })
+                NavigationBarItem(selected = activeNav == 2, onClick = { activeNav = 2; showSale = true }, icon = { Icon(Icons.Default.PointOfSale, null) }, label = { Text("المبيعات") })
+                NavigationBarItem(selected = activeNav == 3, onClick = { activeNav = 3; stockFilterTab = 1 }, icon = { Icon(Icons.Default.Inventory2, null) }, label = { Text("المخزون") })
+                NavigationBarItem(selected = activeNav == 4, onClick = { activeNav = 4; showDebts = true }, icon = { Icon(Icons.Default.MoreHoriz, null) }, label = { Text("المزيد") })
+            }
+        },
         topBar = {
-            Column(Modifier.fillMaxWidth().background(Panel).padding(18.dp)) {
-                Text("DICTATOR", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                Text("PHARMACY MANAGEMENT SYSTEM", color = Muted, style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.height(8.dp))
-                Text("إدارة الصيدلية", color = Color.White)
-                Text("تتم مزامنة الأدوية والمخزون والمبيعات والمديونيات مع الأجهزة المعتمدة عند توفر الإنترنت.", color = Color(0xFF75C995), style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 18.dp, vertical = 14.dp)) {
+                Text("DICTATOR PHARMACY", color = Crimson, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text("إدارة دقيقة… وصيدلية أكثر كفاءة", color = Blue, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("إدارة الصيدلية  •  ${session.pharmacyName}", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Dictator_channel2"))) }) {
+                        Icon(Icons.Default.Send, contentDescription = null, tint = Blue, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("قناة تيليجرام")
+                    }
+                }
+                Text("تتم المزامنة تلقائيًا عند توفر الإنترنت مع الاحتفاظ بالبيانات محليًا.", color = Blue, style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButton = {
@@ -584,14 +610,14 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                 SummaryTile("نفد", outOfStock.size.toString(), Modifier.weight(1f))
             }
             Spacer(Modifier.height(12.dp))
-            TabRow(selectedTabIndex = selectedTab, containerColor = Panel, contentColor = Color.White) {
+            TabRow(selectedTabIndex = stockFilterTab, containerColor = Panel, contentColor = Color.White) {
                 listOf("الكل", "نواقص", "نفد").forEachIndexed { index, label ->
-                    Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(label) })
+                    Tab(selected = stockFilterTab == index, onClick = { stockFilterTab = index }, text = { Text(label) })
                 }
             }
             Spacer(Modifier.height(12.dp))
             if (visibleMedicines.isEmpty()) {
-                Text(when (selectedTab) {
+                Text(when (stockFilterTab) {
                     1 -> "لا توجد أصناف منخفضة المخزون."
                     2 -> "لا توجد أصناف نفد مخزونها."
                     else -> "لا توجد أدوية مطابقة. اضغط + لإضافة دواء."
