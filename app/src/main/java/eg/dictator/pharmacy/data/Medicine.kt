@@ -115,3 +115,19 @@ data class CustomerDebtWithDetails(
     @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val items: List<DebtItem>,
     @androidx.room.Relation(parentColumn = "id", entityColumn = "debtId") val payments: List<DebtPayment>
 )
+
+
+@Entity(
+    tableName = "sale_returns",
+    foreignKeys = [ForeignKey(entity = SaleItem::class, parentColumns = ["id"], childColumns = ["saleItemId"], onDelete = ForeignKey.RESTRICT)],
+    indices = [Index("saleItemId"), Index("createdAt")]
+)
+data class SaleReturn(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val saleItemId: Long,
+    val medicineId: Long,
+    val quantity: Int,
+    val refundAmount: Double,
+    val reason: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
