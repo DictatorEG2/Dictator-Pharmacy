@@ -19,10 +19,10 @@ abstract class MedicineDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     abstract suspend fun insertMedicineReferences(rows: List<MedicineReference>)
 
-    @Query("SELECT id, commercialNameEn, commercialNameAr, scientificName, manufacturer, drugClass, route, priceEgp FROM medicine_reference WHERE commercialNameEn LIKE '%' || :query || '%' COLLATE NOCASE OR commercialNameAr LIKE '%' || :query || '%' COLLATE NOCASE OR scientificName LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY commercialNameAr COLLATE NOCASE LIMIT 30")
+    @Query("SELECT id, commercialNameEn, commercialNameAr, scientificName, manufacturer, drugClass, route, priceEgp FROM medicine_reference WHERE LOWER(commercialNameEn) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(commercialNameAr),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(scientificName),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR LOWER(manufacturer) LIKE '%' || :query || '%' ORDER BY commercialNameAr COLLATE NOCASE LIMIT 40")
     abstract fun searchMedicineReference(query: String): Flow<List<MedicineReference>>
 
-    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR category LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 100")
+    @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines WHERE LOWER(name) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' OR LOWER(category) LIKE '%' || :query || '%' OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(category),'أ','ا'),'إ','ا'),'آ','ا'),'ٱ','ا'),'ى','ي') LIKE '%' || :query || '%' ORDER BY name COLLATE NOCASE LIMIT 200")
     abstract fun search(query: String): Flow<List<Medicine>>
 
     @Query("SELECT id, name, category, sellingPrice, quantity, minimumQuantity, barcode, imageUri, updatedAt, remoteId FROM medicines ORDER BY name COLLATE NOCASE LIMIT 500")
