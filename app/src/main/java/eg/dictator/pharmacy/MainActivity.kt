@@ -498,7 +498,7 @@ class PharmacyViewModel(
 
     private val pendingSaleOperations = mutableMapOf<String, String>()
 
-    fun completeSale(lines: List<SaleLineRequest>, onResult: (Result<String>) -> Unit) {
+    fun completeSale(lines: List<SaleLineRequest>, discountPercent: Double, onResult: (Result<String>) -> Unit) {
         viewModelScope.launch {
             try {
                 val operationKey = lines.sortedBy { it.medicineId }
@@ -506,13 +506,17 @@ class PharmacyViewModel(
                 val operationId = pendingSaleOperations.getOrPut(operationKey) {
                     java.util.UUID.randomUUID().toString()
                 }
-                val remoteLines = lines.map { line ->
+                require(discountPercent.isFinite() && discountPercent >= 0.0 && discountPercent <= 100.0) { "نسبة الخصم يجب أن تكون بين 0 و100" }
+                val selected = lines.map { line ->
                     val medicine = dao.medicineById(line.medicineId) ?: error("أحد الأصناف لم يعد موجودًا")
                     val remoteId = medicine.remoteId ?: error("هذا الصنف محلي وغير مرتبط بمخزون الصيدلية السحابي")
-                    remoteId to line.quantity
+                    Triple(remoteId, line.quantity, medicine.sellingPrice)
                 }
+                val remoteLines = selected.map { it.first to it.second }
+                val subtotalMinor = selected.sumOf { (_, quantity, price) -> (price * 100.0 * quantity).toLong() }
+                val discountMinor = kotlin.math.round(subtotalMinor * discountPercent / 100.0).toLong()
                 val response = withContext(Dispatchers.IO) {
-                    PharmacyDataApi.createSale(session.token, operationId, remoteLines)
+                    PharmacyDataApi.createSale(session.token, operationId, remoteLines, discountMinor = discountMinor)
                 }
                 pendingSaleOperations.remove(operationKey)
                 refreshCloudCatalog()
@@ -740,7 +744,7 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     if (showSale) SaleDialog(
         medicines = allMedicines,
         onDismiss = { showSale = false },
-        onComplete = { lines, callback -> vm.completeSale(lines, callback) }
+        onComplete = { lines, discountPercent, callback -> vm.completeSale(lines, discountPercent, callback) }
     )
 
     if (showAdd && session.role == "manager") AddMedicineDialog(
@@ -883,17 +887,21 @@ private fun AdjustStockDialog(
 private fun SaleDialog(
     medicines: List<Medicine>,
     onDismiss: () -> Unit,
-    onComplete: (List<SaleLineRequest>, (Result<String>) -> Unit) -> Unit
+    onComplete: (List<SaleLineRequest>, Double, (Result<String>) -> Unit) -> Unit
 ) {
     val cart = remember { mutableStateMapOf<Long, Int>() }
     var query by remember { mutableStateOf("") }
+    var discountText by remember { mutableStateOf("0") }
     var saving by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     val filtered = medicines.filter {
         it.quantity > 0 && (query.isBlank() || it.name.contains(query, ignoreCase = true) || it.category.contains(query, ignoreCase = true))
     }
     val cartMedicines = medicines.filter { (cart[it.id] ?: 0) > 0 }
-    val total = cartMedicines.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+    val subtotal = cartMedicines.sumOf { it.sellingPrice * (cart[it.id] ?: 0) }
+    val discountPercent = discountText.toDoubleOrNull()?.takeIf { it >= 0.0 && it <= 100.0 } ?: 0.0
+    val discountAmount = subtotal * discountPercent / 100.0
+    val total = subtotal - discountAmount
 
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -934,15 +942,19 @@ private fun SaleDialog(
                         Text("${cart[medicine.id]} × ${medicine.sellingPrice} ج.م")
                     }
                 }
-                Text("الإجمالي: %.2f ج.م".format(total), color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
+                OutlinedTextField(discountText, { discountText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) }, label = { Text("خصم بالنسبة المئوية %") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                if (discountText.toDoubleOrNull() == null || discountText.toDouble() < 0.0 || discountText.toDouble() > 100.0) Text("أدخل نسبة من 0 إلى 100", color = Color(0xFFB3261E))
+                Text("قبل الخصم: %.2f ج.م".format(subtotal), color = Muted)
+                Text("قيمة الخصم: %.2f ج.م".format(discountAmount), color = Blue)
+                Text("الإجمالي بعد الخصم: %.2f ج.م".format(total), color = Color(0xFF172B36), fontWeight = FontWeight.Bold)
                 message?.let { Text(it, color = Color(0xFFFF8888)) }
             }
         },
         confirmButton = {
-            TextButton(enabled = cart.isNotEmpty() && !saving, onClick = {
+            TextButton(enabled = cart.isNotEmpty() && !saving && discountText.toDoubleOrNull()?.let { it >= 0.0 && it <= 100.0 } == true, onClick = {
                 saving = true
                 val lines = cart.map { SaleLineRequest(it.key, it.value) }
-                onComplete(lines) { result ->
+                onComplete(lines, discountPercent) { result ->
                     saving = false
                     result.onSuccess { saleId ->
                         message = "تم تسجيل الفاتورة #$saleId"
