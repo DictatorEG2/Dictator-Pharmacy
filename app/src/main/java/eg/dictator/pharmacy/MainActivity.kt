@@ -665,13 +665,17 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
                         val normalizedAr = normalizeMedicineQuery(reference.commercialNameAr)
                         val normalizedEn = normalizeMedicineQuery(reference.commercialNameEn)
                         val normalizedCombined = normalizeMedicineQuery(
+                            reference.commercialNameAr + " / " + reference.commercialNameEn
+                        )
+                        val normalizedWithoutSeparator = normalizeMedicineQuery(
                             reference.commercialNameAr + " " + reference.commercialNameEn
                         )
                         val existingMedicine = allMedicines.firstOrNull {
                             val savedName = normalizeMedicineQuery(it.name)
                             savedName == normalizedAr ||
                                 savedName == normalizedEn ||
-                                savedName == normalizedCombined
+                                savedName == normalizedCombined ||
+                                savedName == normalizedWithoutSeparator
                         }
                         Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
                             Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
