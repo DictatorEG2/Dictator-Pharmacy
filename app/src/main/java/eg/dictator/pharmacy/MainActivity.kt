@@ -600,6 +600,60 @@ private fun PharmacyScreen(vm: PharmacyViewModel, session: SecureSessionStore.Se
     var downloadedUpdate by remember { mutableStateOf<java.io.File?>(null) }
     var updateBusy by remember { mutableStateOf(false) }
     var updateMessage by remember { mutableStateOf("الإصدار الحالي: " + BuildConfig.VERSION_NAME) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
+    // Check GitHub Releases automatically whenever a pharmacy session opens.
+    // Android still requires the user to confirm installation through its package installer.
+    LaunchedEffect(session.pharmacyId) {
+        updateBusy = true
+        try {
+            val found = withContext(Dispatchers.IO) { AppUpdater.checkForUpdate() }
+            availableRelease = found
+            if (found != null) {
+                updateMessage = "يتوفر تحديث جديد: " + found.tag
+                showUpdateDialog = true
+            } else {
+                updateMessage = "أنت تستخدم أحدث إصدار متاح (" + BuildConfig.VERSION_NAME + ")."
+            }
+        } catch (error: Exception) {
+            updateMessage = error.message ?: "تعذر فحص التحديث تلقائيًا. يمكنك إعادة المحاولة من قسم المزيد."
+        } finally {
+            updateBusy = false
+        }
+    }
+
+    if (showUpdateDialog && availableRelease != null) {
+        val release = availableRelease!!
+        AlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            title = { Text("تحديث جديد متاح") },
+            text = {
+                Text("يتوفر الإصدار ${release.tag}. سيتم تنزيله ثم فتح مثبت Android لتأكيد التحديث، مع الاحتفاظ ببيانات الصيدلية.")
+            },
+            confirmButton = {
+                TextButton(enabled = !updateBusy, onClick = {
+                    showUpdateDialog = false
+                    updateBusy = true
+                    updateMessage = "جارٍ تنزيل الإصدار " + release.tag + "..."
+                    updateScope.launch {
+                        try {
+                            val file = withContext(Dispatchers.IO) { AppUpdater.downloadRelease(context, release) }
+                            downloadedUpdate = file
+                            val opened = AppUpdater.installOrRequestPermission(context, file)
+                            updateMessage = if (opened) "تم فتح مثبت Android. أكّد التثبيت لإكمال التحديث." else "اسمح بالتثبيت من هذا المصدر، ثم ارجع إلى قسم المزيد واضغط تثبيت التحديث."
+                        } catch (error: Exception) {
+                            updateMessage = error.message ?: "تعذر تنزيل التحديث."
+                        } finally {
+                            updateBusy = false
+                        }
+                    }
+                }) { Text("تنزيل التحديث") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdateDialog = false }) { Text("لاحقًا") }
+            }
+        )
+    }
     val visibleMedicines = when (stockFilterTab) {
         1 -> lowStock
         2 -> outOfStock
